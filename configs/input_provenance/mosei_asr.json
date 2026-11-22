@@ -1,0 +1,17 @@
+{
+  "model": "model",
+  "model_sha256": "404fa07b37813e1a425ae22348db6f7d0b359f72acd8d457927cc0d029beb278",
+  "source_sha256": "2dfb47e6e7e66d1cfa085e8629377629be54106f6de710ac4fdaecce9c512d15",
+  "audio_protocol_sha256": "fcb6914d47c9b5458070a47b73d0e4859d0eaa990d89d63898c4377efdc2a548",
+  "sample_rate": 16000,
+  "window_seconds": 8,
+  "beam": 1,
+  "max_new_tokens": 96,
+  "device": "cuda",
+  "dtype": "float32",
+  "ids_sha256": "2e9f8587629e028802752d27ac962919a1384a32810e839f58be9e9e5ba62a81",
+  "input": "current clip waveform only; no native transcript, label, neighbor or contextual prompt",
+  "torch_version": "2.3.1+cu118",
+  "bert": "bert-base-uncased",
+  "bert_pooling": "non-special token mean, max96 tokens"
+}

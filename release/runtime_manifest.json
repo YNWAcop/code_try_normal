@@ -1,0 +1,32 @@
+{
+  "version": "2026-11-22-final-portable",
+  "files": {
+    "src/evidence_msa/__init__.py": "48823b9086b47a02a8c4a0ca2c307e8daf418f1cdb6254f2b36b8cfd0d286748",
+    "src/evidence_msa/common/__init__.py": "48823b9086b47a02a8c4a0ca2c307e8daf418f1cdb6254f2b36b8cfd0d286748",
+    "src/evidence_msa/common/checkpoint.py": "818d54b845a9c196578fcc05ad6b9765dd8051b546c11ee1420ae99222bd4978",
+    "src/evidence_msa/common/metrics.py": "12f605a35fddc3aee710c9f9fcc849ce8d25696e070557de45f394801da49db5",
+    "src/evidence_msa/common/v1_metrics.py": "9ec51b84663c5592d7b87c1907e75204b4b130e905c4fdce70b728526773d137",
+    "src/evidence_msa/features/__init__.py": "48823b9086b47a02a8c4a0ca2c307e8daf418f1cdb6254f2b36b8cfd0d286748",
+    "src/evidence_msa/features/prepare.py": "0c722c09ec9d9bade0a9c91435ddb2f7ca2e968497e95a88b213dab72ae76d6b",
+    "src/evidence_msa/inference.py": "a9f5359f1ca28d52f779af884e7c09b9298200a118834093f35ebbdbffe9acda",
+    "src/evidence_msa/preflight.py": "ecd8779e05456c76cab465bc62b2f0462ad997028bde7760a11547341157c36c",
+    "src/evidence_msa/settings.py": "9289e46b65f9add8079b4c8e28a95f8804cd237becd70b8c844c34728277f598",
+    "src/evidence_msa/text_absent/__init__.py": "48823b9086b47a02a8c4a0ca2c307e8daf418f1cdb6254f2b36b8cfd0d286748",
+    "src/evidence_msa/text_absent/v1.py": "e9d91d2bd035d68b39554cde41af343e020ea41b00ce5460a8860ec747c90e12",
+    "src/evidence_msa/text_present/__init__.py": "48823b9086b47a02a8c4a0ca2c307e8daf418f1cdb6254f2b36b8cfd0d286748",
+    "src/evidence_msa/text_present/adapters.py": "a578f87e6486250d5f75466aa3cb1df5aefa18c725783f5ce74da42627871e41",
+    "src/evidence_msa/text_present/calibration.py": "af2836c8b7aca104302dc7cf6aa23dad10a89517733270c4c79a06c664e74661",
+    "src/evidence_msa/text_present/cell_text_anchor.py": "cc987ae17b5f75e7da663345824126c8dcddf6958d369df63a007533b93e05a3",
+    "src/evidence_msa/text_present/data.py": "0d876213fa3225911d1485d49e658a9da65c456e62b4423f336170063f389aed",
+    "src/evidence_msa/text_present/factorized_anchor.py": "7a737e3b57961523551ff969f7a5797b6a6e809edd9722356de532a4b3442453",
+    "src/evidence_msa/text_present/model.py": "0d476cf29d252f618205cd310e83387be01ccef3a8da77942520d55223215126",
+    "src/evidence_msa/text_present/protocol.py": "c35b6730e8c007958437e006fb677c5f675ac651ada54d8a7bf67eaebf6b7b2e",
+    "src/evidence_msa/text_present/raw_adapters.py": "71d4736db0516db5a2ba667661c42c357b559610b125ab4f71a8e98da4ab18a1",
+    "src/evidence_msa/text_present/runner.py": "b34c0bb3bd97a94d8472312913098fcfa5eb5353df55bfd550031f307c0bc105",
+    "src/evidence_msa/text_present/supervisor.py": "655a30e1e1e47e6f659e4d235babcf0c8096790a38cc4115f703bb695c24eec0",
+    "src/evidence_msa/text_present/text_anchor.py": "ccfe67bb846d71abbd2eef414ce721e1c367c4858f0551b75db93255accdeb2c",
+    "src/evidence_msa/text_present/train.py": "0fb5098b0ce981b259d362c4f54b72663329c8295f2ac43cae3d4347b4759ba3",
+    "run.py": "11644dd2195b5c1ee10941b559e17cb637b31a78b9df360fcbaaaaf9d28cea84",
+    "configs/final_protocol.json": "08e1ba42d72cdea6a95f2364db8a3d37d98bc55e2b28cc0a0ad88605e2c7dcc6"
+  }
+}

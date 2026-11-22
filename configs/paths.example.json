@@ -1,0 +1,5 @@
+{
+  "data_root": "./data",
+  "text_run_root": "./runs/text_present",
+  "v1_checkpoint_root": "./runs/text_absent"
+}

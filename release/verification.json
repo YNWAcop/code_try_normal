@@ -1,0 +1,53 @@
+{
+  "version": "2026-11-22-final-portable",
+  "new_training_run": false,
+  "checks": {
+    "unit_tests": {
+      "passed": true,
+      "output": "test_algorithm_source_preserved (test_contracts.Contracts) ... ok\ntest_c5_missing_inputs (test_contracts.Contracts) ... ok\ntest_interval_boundaries (test_contracts.Contracts) ... ok\ntest_metric_definitions (test_contracts.Contracts) ... ok\ntest_original_cell_rule_equivalence (test_contracts.Contracts) ... ok\ntest_repair_scope (test_contracts.Contracts) ... ok\ntest_runtime_imports (test_contracts.Contracts) ... ok\ntest_v1_missing_inputs (test_contracts.Contracts) ... ok\n\n----------------------------------------------------------------------\nRan 8 tests in 1.800s\n\nOK\n"
+    },
+    "syntax": "all Python files parse",
+    "V1_checkpoint_replay": "Not performed: release checks V1 source and missing-modality isolation, not archived V1 weights."
+  },
+  "prediction_replay": {
+    "mosi": {
+      "T": {
+        "n": 64,
+        "max_absolute_difference": 1.2406929039698866e-08,
+        "all_class_predictions_equal": true
+      },
+      "TA": {
+        "n": 64,
+        "max_absolute_difference": 2.3473051058431338e-08,
+        "all_class_predictions_equal": true
+      },
+      "TV": {
+        "n": 64,
+        "max_absolute_difference": 2.176593261182802e-08,
+        "all_class_predictions_equal": true
+      }
+    },
+    "mosei": {
+      "T": {
+        "n": 64,
+        "max_absolute_difference": 1.1174534186864093e-08,
+        "all_class_predictions_equal": true
+      },
+      "TA": {
+        "n": 64,
+        "max_absolute_difference": 1.8515241784200498e-08,
+        "all_class_predictions_equal": true
+      },
+      "TV": {
+        "n": 64,
+        "max_absolute_difference": 1.4759361066651877e-08,
+        "all_class_predictions_equal": true
+      }
+    }
+  },
+  "limits": [
+    "No fresh full training was run for packaging.",
+    "Text replay covers first 64 already evaluated samples per dataset, labels not read.",
+    "No statistical or independent-test claim follows from packaging checks."
+  ]
+}

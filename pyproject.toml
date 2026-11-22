@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evidence-msa"
+version = "0.1.0"
+description = "Frozen V1 and C5 + D24 + R3 multimodal sentiment research code"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24,<2", "torch>=2.3,<2.4", "scikit-learn==1.3.2", "joblib>=1.3,<2", "threadpoolctl>=3"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

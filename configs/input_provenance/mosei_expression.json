@@ -1,0 +1,11 @@
+{
+  "source": "https://hf-mirror.com/datasets/tamb2203579/CMU-MOSEI/resolve/main/Raw.zip",
+  "zip_bytes": 27280713458,
+  "coverage": 22856,
+  "index_size": 22856,
+  "information": "RGB only; labels/text/audio never used; same extractor as MOSI",
+  "sha256_encoder": "7aa2ea31c1311f4f8aa9d3fdb085d418dd4e7a48c4b9ed41df8c044f91d0213f",
+  "integrity": "ZIP central directory CRC32 and uncompressed size every clip; source clip SHA256 logged",
+  "cleanup": "only newly created temporary mp4 under this run tmp after verified feature output",
+  "code_sha256": "b7b2b9000a41758585aec60a40d9bd3b853f423079da55a6c211cb4f4e964975"
+}

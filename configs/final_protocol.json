@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "experiment": "frozen D24-R3 original-split fresh retraining",
+  "historical_design_exposure": true,
+  "pristine_independent_test": false,
+  "datasets": [
+    "mosi",
+    "mosei"
+  ],
+  "source_splits": [
+    "train",
+    "valid"
+  ],
+  "original_test_opened": false,
+  "methods": [
+    "C5",
+    "D24-R3"
+  ],
+  "conditions": [
+    "T",
+    "TA",
+    "TV"
+  ],
+  "metrics": [
+    "Acc7",
+    "Acc5",
+    "Acc2_nonzero",
+    "F1_weighted_nonzero",
+    "MAE",
+    "Corr"
+  ],
+  "outer_folds": 0,
+  "outer_split": "original train/valid/test",
+  "inner_validation": "original valid only",
+  "refit_after_selection": false,
+  "outer_scores": "single original test after both dataset selection locks",
+  "stopping": "complete both fixed dataset jobs once",
+  "seed_policy": "no manual seed or seed sweep; ordinary stochastic training; RNG state for resumption",
+  "preprocessing": "fit every scaler, ridge, reliability weight within component training videos",
+  "no_old_learned_weights": true,
+  "no_distillation": true,
+  "C5": {
+    "epochs": 40,
+    "batch": 64,
+    "lr": 0.0003,
+    "weight_decay": 0.001,
+    "hidden": 128
+  },
+  "D24": {
+    "core": "same fresh C5 as C5 comparator",
+    "D5_epochs": 20,
+    "anchor_epochs": 40,
+    "cell_epochs": 40,
+    "crossfit_folds": 4,
+    "crossfit_epochs": "fixed from main inner-validation component selection",
+    "text_blend": 0.25,
+    "cell_strength": 0.5,
+    "cell_margin": 0.4,
+    "warp_penalty": 0.001,
+    "warp_strength": 0.5,
+    "increment_gate_strength": 0.5,
+    "consensus_strength": 0.5,
+    "intensity_strength": 1.0,
+    "factor_blend": 0.25,
+    "factor_epochs": 40,
+    "ensemble_members": 5
+  },
+  "own_checkpoint_selection": "weighted mean of six scaled inner-valid metrics; T:1 TA:2 TV:2; earliest tie",
+  "selection_scales": {
+    "classification": 0.02,
+    "MAE": 0.05,
+    "Corr": 0.05
+  },
+  "baseline_selection": "retain adapter protocol: internal-valid nonzero Acc2 then lower MAE then earliest",
+  "baseline_features": "original official feature files required, not substituted with C5 features",
+  "frozen_A_V_AV": "old V1 files retained; not part of this text-present CV",
+  "report": "original test benchmark; historical test exposure remains; not independent confirmation",
+  "R3": {
+    "radius": 0.1,
+    "confidence": 0.1,
+    "regularization": 0.001,
+    "epsilon": 0.0001
+  }
+}

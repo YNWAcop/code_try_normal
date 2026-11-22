@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "source": "https://hf-mirror.com/datasets/tamb2203579/CMU-MOSEI/resolve/main/Raw.zip",
+  "zip_bytes": 27280713458,
+  "index_sha256": "eecff9fcf526d55f43ef6c1625dbf80f19a86256bf53da7113c8d364a0e7f685",
+  "weights_sha256": "fbf7cd70ff1c0e694b3030fb779dbb4570f04e4b841d62f9296c229e94878ddb",
+  "weights_bytes": 1001892616,
+  "code_sha256": "60b5506c71a313f25c640b6fe52cbdc10004efb1f38913aa3b6d586385abff08",
+  "mouth_code_sha256": "2a067caac4c8a1bad67d7cc7032e2323f219ca0bb1f8a9c49b9ac7fd7b4a7669",
+  "yunet_sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+  "upstream_preprocess_sha256": "986632fbb7f3ec189f4be9ab58e8f6ae4e782274290d3cfa1a7df4d5c99d2060",
+  "units_sha256": "29001d967ad290e28f6f1d7d47e07e314354bf67d3b1f494e936fa2fed9a9122",
+  "ids_sha256": "2e9f8587629e028802752d27ac962919a1384a32810e839f58be9e9e5ba62a81",
+  "split_sizes": {
+    "train": 16326,
+    "valid": 1871,
+    "test": 4659
+  },
+  "input": "current-utterance RGB only; no audio decoding, dataset transcript, labels, neighbors",
+  "source_model": "official Auto-AVSR 3291-hour VSR; external pretraining",
+  "preprocessing": "25fps YuNet largest face, 4-point mouth approximation, gray96 center88, .421/.165",
+  "chunk_frames": 300,
+  "chunk_overlap": 0,
+  "decoding": "CTC greedy, repeated tokens collapse before blank removal",
+  "aggregation": "MOSI-compatible mean/std pooled1536; 16 equal-time encoder summaries 16x768",
+  "quality_order": [
+    "face_detection_fraction",
+    "usable_chunk_frame_fraction",
+    "normalized_ctc_entropy",
+    "ctc_blank_probability",
+    "duration_seconds"
+  ],
+  "no_face": "zero visual vectors, empty transcript, quality reflects unavailable chunks; retained as sample",
+  "cleanup": "Only unique MP4 freshly created under mosei_vsr/tmp, after verified feature output",
+  "fingerprint": "535e02510ef0b452b96f1751ee3056f9f83e5638ed45de69537656981e988587"
+}

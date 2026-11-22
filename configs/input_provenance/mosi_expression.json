@@ -1,0 +1,21 @@
+{
+  "model": "EmotiEffLib enet_b0_8_best_afew",
+  "upstream": "https://github.com/sb-ai-lab/EmotiEffLib",
+  "weights_sha256": "7aa2ea31c1311f4f8aa9d3fdb085d418dd4e7a48c4b9ed41df8c044f91d0213f",
+  "detector_sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+  "code_sha256": "aa32a1d4f70b653276bc27e7ac8ee31323b6acc350ae87b41e437507ec9fb9a4",
+  "frames": 8,
+  "classes": [
+    "Anger",
+    "Contempt",
+    "Disgust",
+    "Fear",
+    "Happiness",
+    "Neutral",
+    "Sadness",
+    "Surprise"
+  ],
+  "input": "RGB frames only; no audio, ASR, dataset text or labels used for extraction",
+  "external_supervision": "upstream pretrained expression model; must disclose extra pretraining relative to fixed features",
+  "extraction": "largest detected face; 15% crop margin; failed detection zero feature + mask; no manual test selection"
+}

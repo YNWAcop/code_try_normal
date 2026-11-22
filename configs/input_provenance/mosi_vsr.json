@@ -1,0 +1,15 @@
+{
+  "input": "current-utterance RGB only; no audio, original transcript, labels or neighboring clips",
+  "source": "official Auto-AVSR 3291-hour visual speech model",
+  "weights": {
+    "bytes": 1001892616,
+    "sha256": "fbf7cd70ff1c0e694b3030fb779dbb4570f04e4b841d62f9296c229e94878ddb",
+    "md5": "49f770f2c0d8b8d769347ee47ed1648f",
+    "source": "https://drive.usercontent.google.com/download?id=1r1kx7l9sWnDOCnaFHIGvOtzuhFyFA88_&export=download&confirm=t"
+  },
+  "preprocessing": "25 fps; YuNet largest face; four-point mouth alignment; gray88 normalized .421/.165",
+  "chunk_frames": 300,
+  "aggregation": "all frame embeddings mean/std; 16 equal-time summaries; CTC greedy text and entropy",
+  "code_sha256": "2a067caac4c8a1bad67d7cc7032e2323f219ca0bb1f8a9c49b9ac7fd7b4a7669",
+  "extra_pretraining": true
+}

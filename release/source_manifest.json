@@ -1,0 +1,283 @@
+{
+  "version": "2026-11-22-final",
+  "files": [
+    {
+      "source": "C5_local_training/source_C5/metrics_common.py",
+      "source_sha256": "12f605a35fddc3aee710c9f9fcc849ce8d25696e070557de45f394801da49db5",
+      "destination": "src/evidence_msa/common/metrics.py",
+      "destination_sha256": "12f605a35fddc3aee710c9f9fcc849ce8d25696e070557de45f394801da49db5",
+      "changes": []
+    },
+    {
+      "source": "C5_local_training/source_C5/common.py",
+      "source_sha256": "625394b36cee7f39952085f75f45e88a9cf544626e26c2c60e37c49fd107ed8c",
+      "destination": "src/evidence_msa/common/checkpoint.py",
+      "destination_sha256": "818d54b845a9c196578fcc05ad6b9765dd8051b546c11ee1420ae99222bd4978",
+      "changes": [
+        "from metrics_common import atomic_json, digest"
+      ]
+    },
+    {
+      "source": "whole_priority_20261117/metrics.py",
+      "source_sha256": "9ec51b84663c5592d7b87c1907e75204b4b130e905c4fdce70b728526773d137",
+      "destination": "src/evidence_msa/common/v1_metrics.py",
+      "destination_sha256": "9ec51b84663c5592d7b87c1907e75204b4b130e905c4fdce70b728526773d137",
+      "changes": []
+    },
+    {
+      "source": "C5_local_training/source_C5/model.py",
+      "source_sha256": "0d476cf29d252f618205cd310e83387be01ccef3a8da77942520d55223215126",
+      "destination": "src/evidence_msa/text_present/model.py",
+      "destination_sha256": "0d476cf29d252f618205cd310e83387be01ccef3a8da77942520d55223215126",
+      "changes": []
+    },
+    {
+      "source": "C5_local_training/campaign/adapters.py",
+      "source_sha256": "d7c39e61f9d2f0cf961f487fa54c8fd02f03533fb3b49d6c9f9a03f0f4e28278",
+      "destination": "src/evidence_msa/text_present/adapters.py",
+      "destination_sha256": "a578f87e6486250d5f75466aa3cb1df5aefa18c725783f5ce74da42627871e41",
+      "changes": [
+        "sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'source_C5'))",
+        "from model import TextPresent"
+      ]
+    },
+    {
+      "source": "C5_local_training/campaign/raw_adapters.py",
+      "source_sha256": "c85b2bd7c65b73add57519dd2f2ee9225604713361c58ef3136b3653503b0cc6",
+      "destination": "src/evidence_msa/text_present/raw_adapters.py",
+      "destination_sha256": "71d4736db0516db5a2ba667661c42c357b559610b125ab4f71a8e98da4ab18a1",
+      "changes": [
+        "from adapters import DistributionAdapter"
+      ]
+    },
+    {
+      "source": "C5_local_training/campaign/text_anchor.py",
+      "source_sha256": "de8f6537a7f553e87949b8f3aa18a2ce8a4648bef0d482b2efdc46987326a3da",
+      "destination": "src/evidence_msa/text_present/text_anchor.py",
+      "destination_sha256": "ccfe67bb846d71abbd2eef414ce721e1c367c4858f0551b75db93255accdeb2c",
+      "changes": [
+        "from model import mlp"
+      ]
+    },
+    {
+      "source": "C5_local_training/campaign/cell_text_anchor.py",
+      "source_sha256": "3605a4bc3ad989124f9fe1e95be9140c953fc1206d3bfe3995c9d88924463a77",
+      "destination": "src/evidence_msa/text_present/cell_text_anchor.py",
+      "destination_sha256": "cc987ae17b5f75e7da663345824126c8dcddf6958d369df63a007533b93e05a3",
+      "changes": [
+        "from model import mlp"
+      ]
+    },
+    {
+      "source": "C5_local_training/campaign/factorized_anchor.py",
+      "source_sha256": "68732962f71f822da1b68809f777a5bdf34d3d926c0aa980703c327c18046954",
+      "destination": "src/evidence_msa/text_present/factorized_anchor.py",
+      "destination_sha256": "7a737e3b57961523551ff969f7a5797b6a6e809edd9722356de532a4b3442453",
+      "changes": [
+        "from model import mlp"
+      ]
+    },
+    {
+      "source": "C5_local_training/frozen_retrain_20261122/calibration.py",
+      "source_sha256": "af2836c8b7aca104302dc7cf6aa23dad10a89517733270c4c79a06c664e74661",
+      "destination": "src/evidence_msa/text_present/calibration.py",
+      "destination_sha256": "af2836c8b7aca104302dc7cf6aa23dad10a89517733270c4c79a06c664e74661",
+      "changes": []
+    },
+    {
+      "source": "C5_local_training/frozen_retrain_20261122/protocol.py",
+      "source_sha256": "6a6893b4f356949659bea1db4a0d8625caaffcd36e7e2f6a5bfe3b5fd6cc0af5",
+      "destination": "src/evidence_msa/text_present/protocol.py",
+      "destination_sha256": "c35b6730e8c007958437e006fb677c5f675ac651ada54d8a7bf67eaebf6b7b2e",
+      "changes": [
+        "ROOT=Path(__file__).resolve().parent\nLOCAL=ROOT.parent\nsys.path.insert(0,str(LOCAL/'source_C5'))\nsys.path.insert(0,str(LOCAL/'campaign'))",
+        "from metrics_common import scores",
+        "from common import tsave,loadck,state_cpu,rng_state,restore_rng,lock"
+      ]
+    },
+    {
+      "source": "C5_local_training/frozen_retrain_20261122/train_ours.py",
+      "source_sha256": "4307b1e69e99e861eee2d3b53d7a4e8b35c341ecca31ff083678f07c2572b3fe",
+      "destination": "src/evidence_msa/text_present/train.py",
+      "destination_sha256": "0fb5098b0ce981b259d362c4f54b72663329c8295f2ac43cae3d4347b4759ba3",
+      "changes": [
+        "from protocol import *",
+        "from model import TextPresent,objective",
+        "from raw_adapters import RawEvidenceAdapter",
+        "from text_anchor import TextAnchor",
+        "from cell_text_anchor import CellTextAnchor,cell_objective",
+        "from factorized_anchor import FactorAnchor,objective as factor_loss",
+        "from cell_warp import cells,signature",
+        "import cv_data",
+        "from supervisor import check_code",
+        "from calibration import fit_postprocessors,apply_postprocessors",
+        "from runner import fit_polarity"
+      ]
+    },
+    {
+      "source": "C5_local_training/frozen_retrain_20261122/runner.py",
+      "source_sha256": "ca54e1b648f53c64acb9246505d0026449b9b18fa75136ceaea75020b2e8e618",
+      "destination": "src/evidence_msa/text_present/runner.py",
+      "destination_sha256": "b34c0bb3bd97a94d8472312913098fcfa5eb5353df55bfd550031f307c0bc105",
+      "changes": [
+        "from protocol import *",
+        "import cv_data",
+        "from supervisor import check_code",
+        "from train_ours import",
+        "from calibration import"
+      ]
+    },
+    {
+      "source": "C5_local_training/frozen_retrain_20261122/cv_data.py",
+      "source_sha256": "431a7d72f82a404f4f31b86c1a26e62bfbfb9c8cd0302e3d77a80deddcc5c5b7",
+      "destination": "src/evidence_msa/text_present/data.py",
+      "destination_sha256": "0d876213fa3225911d1485d49e658a9da65c456e62b4423f336170063f389aed",
+      "changes": [
+        "ROOT=Path(__file__).resolve().parent\nSOURCE=Path('D:/MSA_Cloud_20261115/data/ready')",
+        "def pool(ds):\n    source=ROOT.parent/'group_cv_20261122'/'pool'/ds\n    meta=read(source/'complete.json')\n    if ds not in _VERIFIED_POOL:\n        for k,h in meta['files'].items():assert sha(source/(k+'.npy'))==h\n        for split,v in meta['sources'].items():assert sha(SOURCE/ds/(split+'.npz'))==v['sha256']\n        _VERIFIED_POOL.add(ds)\n    local=ROOT/'pool'/ds/'complete.json'\n    if not local.exists():save(local,meta)\n    else:assert read(local)==meta\n    return {k:np.load(source/(k+'.npy'),mmap_mode='r',allow_pickle=False) for k in KEYS+LABEL_KEYS}\n"
+      ]
+    },
+    {
+      "source": "whole_priority_20261117/train_ours_fixed.py",
+      "source_sha256": "b76a7321b35b03733605fb89a47bd8f8e16850d46b2856b51d0aa08b1022891d",
+      "destination": "src/evidence_msa/text_absent/v1.py",
+      "destination_sha256": "e9d91d2bd035d68b39554cde41af343e020ea41b00ce5460a8860ec747c90e12",
+      "changes": [
+        "from metrics import metrics",
+        "ROOT=Path(__file__).resolve().parents[1]",
+        "from metrics_common import scores, digest, atomic_json"
+      ]
+    },
+    {
+      "source": "cloud_bundle/tools/prepare_features.py",
+      "source_sha256": "084c331dfb4f1897e590cbe78f228f484881b5dc16ea43129ea3ffddd89cc79e",
+      "destination": "src/evidence_msa/features/prepare.py",
+      "destination_sha256": "0c722c09ec9d9bade0a9c91435ddb2f7ca2e968497e95a88b213dab72ae76d6b",
+      "changes": [
+        "ROOT=Path(__file__).resolve().parents[1]",
+        "ROOT/'data/ready'",
+        "ROOT/'data/generated'",
+        "ROOT/f'data/author/"
+      ]
+    },
+    {
+      "source": "visual_event_20261111/extract_mosi_whisper_baseen.py",
+      "source_sha256": "5615a29bfb18408a49f8a3ad952ad7173b4a4419dc104c212963f9ce11e775ac",
+      "destination": "archive/input_extraction/extract_mosi_whisper_baseen.py",
+      "destination_sha256": "6e24c5391db31a0f9712269fc2616b02430c2ae0580c2c7176e989c532060c96",
+      "changes": []
+    },
+    {
+      "source": "visual_event_20261111/extract_mosei_whisper_baseen.py",
+      "source_sha256": "2dfb47e6e7e66d1cfa085e8629377629be54106f6de710ac4fdaecce9c512d15",
+      "destination": "archive/input_extraction/extract_mosei_whisper_baseen.py",
+      "destination_sha256": "2dfb47e6e7e66d1cfa085e8629377629be54106f6de710ac4fdaecce9c512d15",
+      "changes": []
+    },
+    {
+      "source": "visual_event_20261111/prepare_mosi_audio_cache.py",
+      "source_sha256": "f8b2fec405c4e6abff6a59fb392aba2b41bbc780f098e566123c4329c29072f7",
+      "destination": "archive/input_extraction/prepare_mosi_audio_cache.py",
+      "destination_sha256": "f8b2fec405c4e6abff6a59fb392aba2b41bbc780f098e566123c4329c29072f7",
+      "changes": []
+    },
+    {
+      "source": "visual_event_20261111/extract_rgb_emotion.py",
+      "source_sha256": "a472399fd50550c27f6bd357e54ca0f9bc0ae59176b70951489ffee171f3f44f",
+      "destination": "archive/input_extraction/extract_rgb_emotion.py",
+      "destination_sha256": "a472399fd50550c27f6bd357e54ca0f9bc0ae59176b70951489ffee171f3f44f",
+      "changes": []
+    },
+    {
+      "source": "visual_event_20261111/mosei_vsr_common.py",
+      "source_sha256": "8fc877b7657e406395878bcce81dd39693a15ad9892e9c65407ec7b285fb7870",
+      "destination": "archive/input_extraction/mosei_vsr_common.py",
+      "destination_sha256": "8fc877b7657e406395878bcce81dd39693a15ad9892e9c65407ec7b285fb7870",
+      "changes": []
+    },
+    {
+      "source": "visual_event_20261111/vsr_feasibility/extract_visual_speech.py",
+      "source_sha256": "2a067caac4c8a1bad67d7cc7032e2323f219ca0bb1f8a9c49b9ac7fd7b4a7669",
+      "destination": "archive/input_extraction/vsr_feasibility/extract_visual_speech.py",
+      "destination_sha256": "2a067caac4c8a1bad67d7cc7032e2323f219ca0bb1f8a9c49b9ac7fd7b4a7669",
+      "changes": []
+    },
+    {
+      "source": "visual_event_20261111/vsr_feasibility/extract_mosei_visual_speech.py",
+      "source_sha256": "60b5506c71a313f25c640b6fe52cbdc10004efb1f38913aa3b6d586385abff08",
+      "destination": "archive/input_extraction/vsr_feasibility/extract_mosei_visual_speech.py",
+      "destination_sha256": "60b5506c71a313f25c640b6fe52cbdc10004efb1f38913aa3b6d586385abff08",
+      "changes": []
+    },
+    {
+      "source": "visual_event_20261111/vsr_feasibility/extract_mosei_visual_speech_async.py",
+      "source_sha256": "877510778baceb07717cf9b554aac9b5772f3bbd049e0420ce3e6038f306835a",
+      "destination": "archive/input_extraction/vsr_feasibility/extract_mosei_visual_speech_async.py",
+      "destination_sha256": "a44601bfc50ddbce32394eae8f83bedc1525ed0321cfbc559e8574dcb0ba03ac",
+      "changes": []
+    },
+    {
+      "source": "visual_event_20261111/vsr_feasibility/extract_mosei_visual_speech_hybrid.py",
+      "source_sha256": "5d2b1b557d442ca5bf5ebd7bcbc5d26a1935ebabb940a2a1941e317bcd9fee6a",
+      "destination": "archive/input_extraction/vsr_feasibility/extract_mosei_visual_speech_hybrid.py",
+      "destination_sha256": "621c85a8d559ba2cd073e2bf454812f93630e06f1719cdd5fec3c7afc89d7020",
+      "changes": []
+    },
+    {
+      "source": "visual_event_20261111/vsr_feasibility/recover_crop_overflow.py",
+      "source_sha256": "59eacce27657e82c3d83e04883c7c5f42ec8c37011bb8b0fe13043491359da11",
+      "destination": "archive/input_extraction/vsr_feasibility/recover_crop_overflow.py",
+      "destination_sha256": "59eacce27657e82c3d83e04883c7c5f42ec8c37011bb8b0fe13043491359da11",
+      "changes": []
+    },
+    {
+      "source": "C5_local_training/frozen_retrain_20261122/protocol.json",
+      "source_sha256": "a46b22ff96664755042d1eb2b68d4b990aad21b3b6ba81c4984efc1cf2c7aaab",
+      "destination": "configs/final_protocol.json",
+      "destination_sha256": "08e1ba42d72cdea6a95f2364db8a3d37d98bc55e2b28cc0a0ad88605e2c7dcc6",
+      "changes": []
+    },
+    {
+      "source": "outputs/final_paper_tables_20261122/all_methods_by_condition.csv",
+      "source_sha256": "c3e26fa2f42877b3c0c288291ab4bd8b18d1f639c0d990748cf3a84123873fa3",
+      "destination": "results/reference/all_methods_by_condition.csv",
+      "destination_sha256": "9c4d2e9fbc0d5885f980fa1a1d0b20e331a678227dabd8c06c3f8f45df0a0fc8",
+      "changes": []
+    },
+    {
+      "source": "outputs/final_paper_tables_20261122/six_condition_means.csv",
+      "source_sha256": "59cfc1122b6dc27ac7f564969442775b20f068cae71bf631ba3c11fdaa4cab84",
+      "destination": "results/reference/six_condition_means.csv",
+      "destination_sha256": "c3564be8e9ec479fe226bf7598a8098cb43d56b07b5a921f31be7f2d0cd15cb5",
+      "changes": []
+    },
+    {
+      "source": "outputs/final_paper_tables_20261122/text_branch_comparison.csv",
+      "source_sha256": "ca435f383af0a8fe782356a67547441579843508a145e5ac651ed41558267986",
+      "destination": "results/reference/text_branch_comparison.csv",
+      "destination_sha256": "afd7490f4df747465d0863970ff8262a70cd2a90ac173cb0f0ab63735444c27b",
+      "changes": []
+    },
+    {
+      "source": "C5_local_training/frozen_retrain_20261122/results.json",
+      "source_sha256": "31aa32fff3b0db2c60ef4f33fbb53a7ecd3996762fa3b309e38311097a57c738",
+      "destination": "results/reference/text_branch_results.json",
+      "destination_sha256": "42891b4b3126a214a6f2b9595da4a0de61c7e282310417d977333482cf922973",
+      "changes": []
+    },
+    {
+      "source": "visual_event_20261111/prefetch_mosei_audio.py",
+      "source_sha256": "b124cbf1a1aa351ccfb2825cbc41fc3cad84fffe71d9fd9b5c54ef21c52d11a7",
+      "destination": "archive/input_extraction/prefetch_mosei_audio.py",
+      "destination_sha256": "b124cbf1a1aa351ccfb2825cbc41fc3cad84fffe71d9fd9b5c54ef21c52d11a7",
+      "changes": []
+    },
+    {
+      "source": "visual_event_20261111/mosei_archive_io.py",
+      "source_sha256": "cc1b19aae6408395cb46471821ffd549826202226c6b5a97ecd9e49807c351ab",
+      "destination": "archive/input_extraction/mosei_archive_io.py",
+      "destination_sha256": "cc1b19aae6408395cb46471821ffd549826202226c6b5a97ecd9e49807c351ab",
+      "changes": []
+    }
+  ]
+}
