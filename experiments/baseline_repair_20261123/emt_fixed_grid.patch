@@ -1,0 +1,21 @@
+--- historical/EMT_DLFR.py
++++ repair/EMT_DLFR.py
+@@ -158,9 +158,15 @@
+         # complete view
+         res = self.forward_once(text, text_lengths, audio, audio_lengths, video, video_lengths, missing=False)
+         # incomplete view
+-        missing_text_lengths = text_m[:, 1, :].sum(1).int() - 2
+-        missing_audio_lengths = audio_lengths if 'A' in self.protocol_condition else torch.ones_like(audio_lengths)
+-        missing_video_lengths = video_lengths if 'V' in self.protocol_condition else torch.ones_like(video_lengths)
++        # Whole-absent streams retain a PUBLIC fixed reconstruction grid.
++        # Its length is the dataset tensor width, never a hidden sample length.
++        # All supplied missing inputs remain constant empty text / zero A,V.
++        missing_text_lengths = (text_m[:, 1, :].sum(1).int() - 2 if 'T' in self.protocol_condition
++                                else torch.full_like(text_lengths, text_m.shape[2] - 1))
++        missing_audio_lengths = (audio_lengths if 'A' in self.protocol_condition
++                                 else torch.full_like(audio_lengths, audio_m.shape[1]))
++        missing_video_lengths = (video_lengths if 'V' in self.protocol_condition
++                                 else torch.full_like(video_lengths, video_m.shape[1]))
+         res_m = self.forward_once(text_m, missing_text_lengths, audio_m, missing_audio_lengths, video_m, missing_video_lengths, missing=True)
+ 
+         return {**res, **res_m}

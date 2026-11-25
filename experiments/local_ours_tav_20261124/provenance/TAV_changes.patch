@@ -1,0 +1,306 @@
+--- original/src/evidence_msa/inference.py
++++ tav/src/evidence_msa/inference.py
+@@ -13,8 +13,8 @@
+ 
+ def canonical(condition):
+     condition = ALIASES.get(condition.upper(), condition.upper())
+-    if condition not in ('T','TA','TV','A','V','AV'):
+-        raise ValueError('Supported conditions: T/A/V/TA/TV/AV (L/LA/LV aliases accepted)')
++    if condition not in ('T','TA','TV','TAV','A','V','AV'):
++        raise ValueError('Supported conditions: T/A/V/TA/TV/AV/TAV (L/LA/LV aliases accepted)')
+     return condition
+ 
+ 
+@@ -28,18 +28,21 @@
+     return d
+ 
+ 
+-def predict_text(d, model_dir, conditions=('T','TA','TV')):
++def predict_text(d, model_dir, conditions=('TAV',)):
+     from .text_present.protocol import configure, read
+     from .text_present.runner import transform_test, repair, raw
+     from .text_present.train import load_composite, composite, predict, FactorAnchor, blend_factor
+     from .text_present.calibration import apply_postprocessors, load as loadpost
++    from .text_present.protocol import CS, DEVICE
++    from .input_views import select_inputs
++    d=select_inputs(d,'enhanced')
+     configure()
+     out = Path(model_dir).resolve()
+     sealed = read(out/'selection_lock.json')
+     for name,h in sealed['artifacts'].items():
+         if digest(out/name) != h: raise RuntimeError('Checkpoint hash mismatch: '+name)
+     dims = read(out/'prep_main/data_complete.json')['dims']
+-    with tempfile.TemporaryDirectory(prefix='evidence_msa_') as td:
++    with tempfile.TemporaryDirectory(prefix='tav_inference_',dir=out.parent) as td:
+         tmp = Path(td)
+         hd = transform_test(d, out/'prep_main', tmp/'main')
+         models = load_composite(dims,out/'main')
+@@ -52,13 +55,13 @@
+             h = transform_test(d, folder/'prep', tmp/f'sub_{j}')
+             model = load_composite(dims, folder/'models')
+             zz = composite(model,h)
+-            subpred.append({c:zz['pred_'+c] for c in ('T','TA','TV')})
++            subpred.append({c:zz['pred_'+c] for c in CS})
+             del h, model
+             gc.collect();torch.cuda.empty_cache()
+-        mean = {c:np.mean([v[c] for v in subpred],axis=0) for c in ('T','TA','TV')}
++        mean = {c:np.mean([v[c] for v in subpred],axis=0) for c in CS}
+         post = loadpost(out/'post/complete.pt')
+         base = apply_postprocessors(z,mean,post)
+-        factor = FactorAnchor(dims['T']).cuda()
++        factor = FactorAnchor(dims['T']).to(DEVICE)
+         factor.load_state_dict(loadck(out/'factor/best.pt')['model'])
+         adjusted = blend_factor(base,predict(factor,hd,'factor')['pred'])
+         polarity = joblib.load(out/'polarity.joblib')
+--- original/src/evidence_msa/text_present/adapters.py
++++ tav/src/evidence_msa/text_present/adapters.py
+@@ -12,7 +12,7 @@
+         self.core=TextPresent(ck['dims'],ck['config'],ck['hidden']);self.core.load_state_dict(ck['model'])
+         for p in self.core.parameters():p.requires_grad_(False)
+         h=ck['hidden']; width=7 if variant=='D2_logits' else 6
+-        self.heads=nn.ModuleDict({c:nn.Sequential(nn.Linear(3*h+8,64),nn.LayerNorm(64),nn.GELU(),nn.Dropout(.1),nn.Linear(64,width)) for c in ('T','TA','TV')})
++        self.heads=nn.ModuleDict({c:nn.Sequential(nn.Linear(3*h+8,64),nn.LayerNorm(64),nn.GELU(),nn.Dropout(.1),nn.Linear(64,width)) for c in ('T','TA','TV','TAV')})
+         for head in self.heads.values():nn.init.zeros_(head[-1].weight);nn.init.zeros_(head[-1].bias)
+     def train(self,mode=True):
+         super().train(mode);self.core.eval();return self
+--- original/src/evidence_msa/text_present/calibration.py
++++ tav/src/evidence_msa/text_present/calibration.py
+@@ -14,7 +14,7 @@
+ 
+ from ..settings import DEVICE, SMOKE
+ 
+-CS = ('T', 'TA', 'TV')
++CS = ('T', 'TA', 'TV', 'TAV')
+ 
+ def signature(p):
+     p = np.asarray(p)
+@@ -62,7 +62,7 @@
+     def forward(self, x): return 1+self.net(x).squeeze(-1).tanh()
+ 
+ class Intensity(nn.Module):
+-    def __init__(self, d=52):
++    def __init__(self, d=37+9+len(CS)+3):
+         super().__init__(); self.net = nn.Sequential(nn.Linear(d, 32), nn.Tanh(), nn.Dropout(.1), nn.Linear(32, 1))
+         nn.init.zeros_(self.net[-1].weight); nn.init.zeros_(self.net[-1].bias)
+     def forward(self, x): return 2*self.net(x).squeeze(-1).tanh()
+@@ -70,7 +70,7 @@
+ def features(z, base, c):
+     i, lo, hi = cells(base[c]); width = hi-lo
+     u = np.clip((base[c]-lo)/np.maximum(width, 1e-30), 1e-7, 1-1e-7)
+-    x = np.concatenate((z['f_'+c], np.eye(9)[i], np.tile(np.eye(3)[CS.index(c)], (len(i), 1)), np.column_stack((base[c], u, width))), -1).astype('float32')
++    x = np.concatenate((z['f_'+c], np.eye(9)[i], np.tile(np.eye(len(CS))[CS.index(c)], (len(i), 1)), np.column_stack((base[c], u, width))), -1).astype('float32')
+     return x, lo, hi, np.log(u/(1-u))
+ 
+ def correct(p, lo, hi, logit, delta):
+@@ -105,7 +105,7 @@
+ @torch.no_grad()
+ def gated(z, model, mean, scale, pars, device):
+     model.eval(); ps = {'T': np.asarray(z['pred_T'], dtype='float64')}
+-    for c in ('TA', 'TV'):
++    for c in CS[1:]:
+         x = torch.tensor((z['f_'+c]-mean[c])/scale[c], device=device)
+         g = model[c](x).cpu().numpy().astype('float64')
+         ps[c] = (ps['T']+(1+.5*(g-1))*(z['pred_'+c]-ps['T'])).clip(-3, 3)
+@@ -156,22 +156,22 @@
+     if wp.exists(): pars = load(wp)
+     else:
+         pars = {c: fit_warp(train_z['pred_'+c], train_z['y']) for c in CS}; save(wp, pars)
+-    mean = {c: train_z['f_'+c].mean(0) for c in ('TA', 'TV')}
+-    scale = {c: train_z['f_'+c].std(0).clip(.05, None) for c in ('TA', 'TV')}
+-    gates = nn.ModuleDict({c: Gate() for c in ('TA', 'TV')}).to(device)
++    mean = {c: train_z['f_'+c].mean(0) for c in CS[1:]}
++    scale = {c: train_z['f_'+c].std(0).clip(.05, None) for c in CS[1:]}
++    gates = nn.ModuleDict({c: Gate() for c in CS[1:]}).to(device)
+     opt = torch.optim.AdamW(gates.parameters(), lr=.001, weight_decay=.01)
+-    x = {c: torch.tensor((train_z['f_'+c]-mean[c])/scale[c], device=device) for c in ('TA', 'TV')}
++    x = {c: torch.tensor((train_z['f_'+c]-mean[c])/scale[c], device=device) for c in CS[1:]}
+     y = torch.tensor(train_z['y'], dtype=torch.float32, device=device)
+     t = torch.tensor(train_z['pred_T'], dtype=torch.float32, device=device)
+-    inc = {c: torch.tensor(train_z['pred_'+c]-train_z['pred_T'], dtype=torch.float32, device=device) for c in ('TA', 'TV')}
++    inc = {c: torch.tensor(train_z['pred_'+c]-train_z['pred_T'], dtype=torch.float32, device=device) for c in CS[1:]}
+     start, best = resume(gates, opt, out/'gate_last.pt', device)
+     for epoch in range(start, 2 if SMOKE else 31):
+         if epoch:
+             gates.train()
+             for ix in torch.randperm(len(y), device=device).split(128):
+                 opt.zero_grad(set_to_none=True)
+-                for c in ('TA', 'TV'):
+-                    g = gates[c](x[c][ix]); loss = gate_loss((t[ix]+g*inc[c][ix]).clamp(-3, 3), y[ix], g)/2
++                for c in CS[1:]:
++                    g = gates[c](x[c][ix]); loss = gate_loss((t[ix]+g*inc[c][ix]).clamp(-3, 3), y[ix], g)/len(CS[1:])
+                     assert torch.isfinite(loss); loss.backward()
+                 torch.nn.utils.clip_grad_norm_(gates.parameters(), 5); opt.step()
+         score = rank_fn(gated(valid_z, gates, mean, scale, pars, device), valid_z['y'])
+@@ -187,7 +187,7 @@
+     xx = np.concatenate([v[0] for v in blocks]); im = xx.mean(0); isc = xx.std(0).clip(.05, None)
+     X = torch.tensor((xx-im)/isc, device=device)
+     lo, hi, lg = [torch.tensor(np.concatenate([v[j] for v in blocks]), device=device) for j in (1, 2, 3)]
+-    Y = torch.tensor(np.tile(train_z['y'], 3), dtype=torch.float64, device=device)
++    Y = torch.tensor(np.tile(train_z['y'], len(CS)), dtype=torch.float64, device=device)
+     intensity = Intensity().to(device); selections = {}
+     for name, epochs, lr in (('smooth_intensity', 1 if SMOKE else 40, .001), ('median_intensity', 1 if SMOKE else 20, .0002)):
+         opt = torch.optim.AdamW(intensity.parameters(), lr=lr, weight_decay=.01)
+@@ -216,7 +216,7 @@
+ @torch.no_grad()
+ def apply_postprocessors(z, fold_mean, state, device=DEVICE):
+     """Label-free inference through D23; root applies frozen D24 factor anchor."""
+-    gates = nn.ModuleDict({c: Gate() for c in ('TA', 'TV')}).to(device); gates.load_state_dict(state['gate_model'])
++    gates = nn.ModuleDict({c: Gate() for c in CS[1:]}).to(device); gates.load_state_dict(state['gate_model'])
+     intensity = Intensity().to(device); intensity.load_state_dict(state['intensity_model'])
+     base = consensus(gated(z, gates, state['gate_mean'], state['gate_scale'], state['warp'], device), fold_mean)
+     return intensify(z, base, intensity, state['intensity_mean'], state['intensity_scale'], device)
+@@ -231,8 +231,8 @@
+             q = correct(p, lo, hi, np.log(u/(1-u)), delta); assert np.array_equal(signature(p), signature(q))
+     # Inference must not consume labels, and projection must preserve signatures
+     n = len(p); z = {**{'pred_'+c: p for c in CS}, **{'f_'+c: np.zeros((n, 37), dtype='float32') for c in CS}}
+-    g = nn.ModuleDict({c: Gate() for c in ('TA', 'TV')}); it = Intensity()
+-    st = dict(warp={c: [[0, 0]]*9 for c in CS}, gate_model=snapshot(g), gate_mean={c: np.zeros(37, dtype='float32') for c in ('TA', 'TV')}, gate_scale={c: np.ones(37, dtype='float32') for c in ('TA', 'TV')}, intensity_model=snapshot(it), intensity_mean=np.zeros(52, dtype='float32'), intensity_scale=np.ones(52, dtype='float32'))
++    g = nn.ModuleDict({c: Gate() for c in CS[1:]}); it = Intensity()
++    st = dict(warp={c: [[0, 0]]*9 for c in CS}, gate_model=snapshot(g), gate_mean={c: np.zeros(37, dtype='float32') for c in CS[1:]}, gate_scale={c: np.ones(37, dtype='float32') for c in CS[1:]}, intensity_model=snapshot(it), intensity_mean=np.zeros(37+9+len(CS)+3, dtype='float32'), intensity_scale=np.ones(37+9+len(CS)+3, dtype='float32'))
+     ps = apply_postprocessors(z, {c: -p for c in CS}, st, 'cpu')
+     assert all(np.array_equal(signature(p), signature(ps[c])) for c in CS)
+     print('PASS: exact boundaries, monotonic warp, intensity and consensus class preservation, label-free inference')
+--- original/src/evidence_msa/text_present/model.py
++++ tav/src/evidence_msa/text_present/model.py
+@@ -43,18 +43,24 @@
+         return app*(1-gate) + lex*gate
+ 
+     def forward(self, b, condition):
+-        if condition not in ('T', 'TA', 'TV'):
++        if condition not in ('T', 'TA', 'TV', 'TAV'):
+             raise ValueError('Route A/V/AV to the frozen V1 model, never this model')
+         t = self.text(b['T']); base = self.base(t); raw = base
+         if condition != 'T':
+-            residual = self.audio(b['A']-b['AS']) if condition == 'TA' else self.visual(b)
++            residuals = []
++            if 'A' in condition: residuals.append(self.audio(b['A']-b['AS']))
++            if 'V' in condition: residuals.append(self.visual(b))
++            residual = torch.stack(residuals).mean(0) if len(residuals)>1 else residuals[0]
+             shared = torch.zeros_like(t)
+             if self.config['shared']:
+-                shared = self.shared_a(b['AS']) if condition == 'TA' else self.shared_v(b['VS'])
++                shared_parts = []
++                if 'A' in condition: shared_parts.append(self.shared_a(b['AS']))
++                if 'V' in condition: shared_parts.append(self.shared_v(b['VS']))
++                shared = torch.stack(shared_parts).mean(0) if len(shared_parts)>1 else shared_parts[0]
+             context_t = t
+             if self.config['attention']:
+                 # Only genuinely visible evidence participates; no zero placeholder token.
+-                tokens = [t, residual] + ([shared] if self.config['shared'] else [])
++                tokens = [t] + residuals + (shared_parts if self.config['shared'] else [])
+                 tokens = torch.stack(tokens, dim=1)
+                 interacted, _ = self.interaction(t[:, None], tokens, tokens, need_weights=False)
+                 context_t = self.inter_norm(t + interacted[:, 0])
+--- original/src/evidence_msa/text_present/protocol.py
++++ tav/src/evidence_msa/text_present/protocol.py
+@@ -8,7 +8,7 @@
+ from ..settings import RUN_ROOT as ROOT, DEVICE, SMOKE, INPUT_MODE, BACKBONE
+ from ..common.metrics import scores
+ from ..common.checkpoint import tsave,loadck,state_cpu,rng_state,restore_rng,lock
+-CS=('T','TA','TV')
++CS=('T','TA','TV','TAV')
+ METRICS=('Acc7','Acc5','Acc2_nonzero','F1_weighted_nonzero','MAE','Corr')
+ CONFIG=dict(distribution=True,polarity=True,shared=True,attention=True)
+ POLICY=dict(
+@@ -38,11 +38,23 @@
+ 
+ POLICY.update(experiment='frozen D24-R3 original-split fresh retraining', methods=['C5','D24-R3'], outer_folds=0, outer_split='original train/valid/test', inner_validation='original valid only', outer_scores='single original test after both dataset selection locks', stopping='complete both fixed dataset jobs once', R3=dict(radius=.1, confidence=.1, regularization=.001, epsilon=1e-4), report='original test benchmark; historical test exposure remains; not independent confirmation')
+ 
+-POLICY.update(ablation_package='cloud_ablation_20261123',input_mode=INPUT_MODE,backbone=BACKBONE,synthetic_smoke=SMOKE,device=DEVICE)
++POLICY.update(experiment='local C5+complete ERU TAV extension v1',
++    package='local_ours_tav_20261124',input_mode=INPUT_MODE,backbone=BACKBONE,synthetic_smoke=SMOKE,device=DEVICE,
++    own_checkpoint_selection='TAV only: mean of six scaled validation metrics, earliest tie',
++    report='TAV primary; T/TA/TV auxiliary diagnostics from this new run, never replacements for old six-condition results',
++    tav_core='text query over [T,A_res,V_res,A_shared,V_shared]; arithmetic mean residual/shared slots preserve head width',
++    tav_eru='raw evidence head projects concatenated A_res,V_res,Q,mean_timeline; all ERU stages retained',
++    training_conditions=list(CS),primary_condition='TAV',loss_average='four visible conditions equally weighted')
+ 
+ def save(p,obj):
+     p=Path(p);p.parent.mkdir(parents=True,exist_ok=True)
+-    tmp=p.with_suffix('.tmp');tmp.write_text(json.dumps(obj,ensure_ascii=False,indent=2,allow_nan=False),encoding='utf-8');os.replace(tmp,p)
++    tmp=p.with_suffix('.tmp');tmp.write_text(json.dumps(obj,ensure_ascii=False,indent=2,allow_nan=False),encoding='utf-8')
++    # Windows readers may briefly hold status.json without delete sharing.
++    for attempt in range(30):
++        try:os.replace(tmp,p);break
++        except PermissionError:
++            if attempt==29:raise
++            time.sleep(.1)
+ 
+ def read(p):return json.loads(Path(p).read_text(encoding='utf-8'))
+ def sha(p):
+@@ -58,7 +70,7 @@
+ 
+ def utility(pred,y):
+     values=[];weights=[]
+-    for c in CS:
++    for c in ('TAV',):
+         m=scores(y,pred[c])['metrics']
+         v=[]
+         for k in METRICS:
+--- original/src/evidence_msa/text_present/raw_adapters.py
++++ tav/src/evidence_msa/text_present/raw_adapters.py
+@@ -14,7 +14,10 @@
+     def __init__(self,dims,c,bilinear):
+         super().__init__();self.c=c;self.bilinear=bilinear;h=64
+         self.text=projection(dims['T'],h)
+-        if c!='T':self.modality=projection(dims['A'] if c=='TA' else dims['V']+dims['Q']+dims['timeline'],h)
++        if c!='T':
++            width_in = dims['A'] if c=='TA' else dims['V']+dims['Q']+dims['timeline']
++            if c=='TAV': width_in += dims['A']
++            self.modality=projection(width_in,h)
+         width=h if c=='T' else h*(4 if bilinear else 2)
+         self.output=nn.Sequential(nn.Linear(width+8,64),nn.LayerNorm(64),nn.GELU(),nn.Dropout(.15),nn.Linear(64,8))
+         nn.init.zeros_(self.output[-1].weight);nn.init.zeros_(self.output[-1].bias)
+@@ -22,6 +25,7 @@
+         t=self.text(b['T']);features=[t]
+         if self.c!='T':
+             x=b['A']-b['AS'] if self.c=='TA' else torch.cat((b['V']-b['VS'],b['Q'],b['timeline'].mean(1)),-1)
++            if self.c=='TAV':x=torch.cat((b['A']-b['AS'],x),-1)
+             m=self.modality(x);features.append(m)
+             if self.bilinear:features.extend((t*m,t-m))
+         return self.output(torch.cat(features+[raw],-1))
+@@ -29,7 +33,7 @@
+ class RawEvidenceAdapter(DistributionAdapter):
+     def __init__(self,ck,variant):
+         super().__init__(ck,'D2_logits');self.variant=variant
+-        self.heads=nn.ModuleDict({c:EvidenceHead(ck['dims'],c,variant=='D5_bilinear') for c in ('T','TA','TV')})
++        self.heads=nn.ModuleDict({c:EvidenceHead(ck['dims'],c,variant=='D5_bilinear') for c in ('T','TA','TV','TAV')})
+     def forward(self,b,c):
+         got={}
+         def capture(k):
+--- original/src/evidence_msa/text_present/runner.py
++++ tav/src/evidence_msa/text_present/runner.py
+@@ -11,7 +11,7 @@
+ from ..input_views import select_inputs
+ 
+ def raw(d,ix,c):
+-    keys={'T':('T',),'TA':('T','A_native','A_words'),'TV':('T','V_native','V_expression','V_lip','V_words','V_quality')}[c]
++    keys={'T':('T',),'TA':('T','A_native','A_words'),'TV':('T','V_native','V_expression','V_lip','V_words','V_quality'),'TAV':('T','A_native','A_words','V_native','V_expression','V_lip','V_words','V_quality')}[c]
+     x=np.concatenate([np.asarray(d[k][ix],dtype=np.float32) for k in keys],axis=1)
+     assert np.isfinite(x).all()
+     return x
+@@ -67,7 +67,12 @@
+     for ds in ('mosi','mosei'):
+         dest=ROOT/'evaluation'/ds;dest.mkdir(parents=True,exist_ok=True)
+         if (dest/'done.json').exists():
+-            assert sha(dest/'results.json')==read(dest/'done.json')['results_sha'];reports.extend(read(dest/'results.json'));continue
++            done=read(dest/'done.json')
++            for name,key in [('results.json','results_sha'),('predictions_test.npz','predictions_sha'),('predictions_c5_test.npz','c5_predictions_sha')]:
++                assert sha(dest/name)==done[key]
++            assert sha(ROOT/'runs'/ds/'fold_0/selection_lock.json')==done['selection_lock_sha']
++            assert sha(cv_data.SOURCE/ds/'test.npz')==done['test_sha']
++            reports.extend(read(dest/'results.json'));continue
+         out=ROOT/'runs'/ds/'fold_0'
+         status(ROOT,'evaluating_locked_test',dataset=ds,test_opened=True)
+         source=cv_data.SOURCE/ds/'test.npz'
+--- original/src/evidence_msa/text_present/train.py
++++ tav/src/evidence_msa/text_present/train.py
+@@ -72,7 +72,7 @@
+             if kind in ('C5','D5'):
+                 b=batch(tr,ix);value=0.
+                 for c in CS:
+-                    loss=objective(model(b,c),y,CONFIG)/3
++                    loss=objective(model(b,c),y,CONFIG)/len(CS)
+                     assert torch.isfinite(loss);loss.backward();value+=float(loss.detach())
+             else:
+                 o=model(torch.tensor(np.array(tr['T'][ix]),device=DEVICE))

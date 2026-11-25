@@ -1,0 +1,577 @@
+--- original/ablation.py
++++ ablation/ablation.py
+@@ -0,0 +1,160 @@
++"""Five predeclared ablations; three pipelines share their C5 comparators."""
++import argparse,csv,hashlib,json,os,shutil,subprocess,sys,time
++from pathlib import Path
++HERE=Path(__file__).resolve().parent
++FAMILIES={'native_full':('native','c5'),'enhanced_full':('enhanced','c5'),'enhanced_plain':('enhanced','simple')}
++VARIANTS={'A0':('native_full','c5'),'A1':('enhanced_full','c5'),'A2':('native_full','final'),'A3':('enhanced_full','final'),'A4':('enhanced_plain','c5')}
++METRICS=('Acc7','Acc5','Acc2_nonzero','F1_weighted_nonzero','MAE','Corr')
++COUNTS={'mosi':{'train':1284,'valid':229,'test':686},'mosei':{'train':16326,'valid':1871,'test':4659}}
++def sha(p):
++    h=hashlib.sha256()
++    with Path(p).open('rb') as f:
++        for b in iter(lambda:f.read(8*1024**2),b''):h.update(b)
++    return h.hexdigest()
++def read(p):return json.loads(Path(p).read_text(encoding='utf-8'))
++def save(p,x):
++    p=Path(p);p.parent.mkdir(parents=True,exist_ok=True);t=p.with_suffix('.tmp');t.write_text(json.dumps(x,ensure_ascii=False,indent=2,allow_nan=False),encoding='utf-8');os.replace(t,p)
++def code_check():
++    m=read(HERE/'release/runtime_manifest.json')
++    for n,h in m['files'].items():
++        if sha(HERE/n)!=h:raise RuntimeError('Package source changed: '+n)
++    return sha(HERE/'release/runtime_manifest.json')
++def check(a):
++    import numpy as np,torch,sklearn,joblib
++    from threadpoolctl import threadpool_limits
++    digest=code_check();result={'source_sha':digest,'smoke':a.smoke,'torch':torch.__version__,'sklearn':sklearn.__version__,'numpy':np.__version__,'cuda_available':torch.cuda.is_available(),'sources':{}}
++    if not a.smoke and not torch.cuda.is_available():raise RuntimeError('Formal training requires CUDA; use the existing cloud CUDA Python environment')
++    expected={} if a.smoke else read(HERE/'expected_data.json')['files']
++    for ds in COUNTS:
++        ids={};groups={}
++        for split in ('train','valid','test'):
++            p=a.data_root/'ready'/ds/(split+'.npz')
++            if not p.exists():raise FileNotFoundError('Required ready feature cache: '+str(p))
++            h=sha(p);key=ds+'/'+split+'.npz'
++            if not a.smoke and h!=expected[key]['sha256']:raise RuntimeError('Input differs from verified local cache: '+str(p))
++            with np.load(p,allow_pickle=False) as z:
++                required=('T','A_native','A_words','V_native','V_lip','V_words','V_expression','V_quality','V_timeline','ids','groups','y')
++                assert all(k in z.files for k in required),(key,z.files)
++                ids[split]=[str(v).replace('$_$','_') for v in z['ids']];groups[split]=set(str(v).replace('$_$','_') for v in z['groups'])
++                assert len(ids[split])==len(set(ids[split]))
++                if not a.smoke:assert len(ids[split])==COUNTS[ds][split]
++            result['sources'][key]={'sha256':h,'samples':len(ids[split])}
++        for x,y in [('train','valid'),('train','test'),('valid','test')]:
++            assert not set(ids[x])&set(ids[y]);assert not groups[x]&groups[y]
++        assert len(groups['train'])>=8,'At least eight training video groups required'
++    result.update(passed=True,test_usage='File hash and IDs/groups only; test labels not loaded by check')
++    a.run_root.mkdir(parents=True,exist_ok=True)
++    frozen=a.run_root/'input_contract.json'
++    identity={'source_sha':digest,'smoke':a.smoke,'sources':result['sources']}
++    if frozen.exists():assert read(frozen)==identity,'Source/data/smoke mode changed; use a new output directory'
++    else:save(frozen,identity)
++    save(a.run_root/'preflight.json',result)
++    print(json.dumps({'passed':True,'smoke':a.smoke,'cuda':result['cuda_available'],'run_root':str(a.run_root)},ensure_ascii=False),flush=True)
++def env_for(a,family):
++    mode,backbone=FAMILIES[family];env=os.environ.copy()
++    env.update(MSA_DATA_ROOT=str(a.data_root),MSA_RUN_ROOT=str(a.run_root/family),MSA_INPUT_MODE=mode,MSA_BACKBONE=backbone,MSA_SMOKE='1' if a.smoke else '0',MSA_DEVICE='cpu' if a.smoke else 'cuda',PYTHONPATH=str(HERE/'src'),PYTHONUNBUFFERED='1',OMP_NUM_THREADS='2' if a.smoke else '4',OPENBLAS_NUM_THREADS='2' if a.smoke else '4',MKL_NUM_THREADS='2' if a.smoke else '4')
++    return env
++def execute(a,jobs,stage):
++    for num,(family,name,args) in enumerate(jobs,1):
++        code_check()
++        if shutil.disk_usage(a.run_root).free < (0.1 if a.smoke else 3)*1024**3:raise RuntimeError('Insufficient disk reserve; no historical artifacts deleted')
++        log=a.run_root/'logs'/(family+'_'+name+'.log');log.parent.mkdir(exist_ok=True)
++        with log.open('a',encoding='utf-8') as f:
++            proc=subprocess.Popen([sys.executable,'-u','-m']+args,cwd=HERE,env=env_for(a,family),stdout=f,stderr=subprocess.STDOUT,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
++            due=0
++            while True:
++                code=proc.poll();now=time.time();files=list((a.run_root/family/'runs').rglob('status.json'));latest=max(files,key=lambda p:p.stat().st_mtime) if files else None
++                child=read(latest) if latest else {}
++                value={'stage':stage,'family':family,'job':name,'job_number':num,'job_count':len(jobs),'worker_pid':proc.pid,'alive':code is None,'exit_code':code,'updated':now,'child':child,'log':str(log),'smoke':a.smoke}
++                save(a.run_root/'status.json',value)
++                if now>=due:
++                    with (a.run_root/'monitor_15min.jsonl').open('a',encoding='utf-8') as m:m.write(json.dumps(value,ensure_ascii=False)+'\n')
++                    due=now+900
++                if code is not None:break
++                time.sleep(2 if a.smoke else 10)
++        if code:raise RuntimeError(f'{family}/{name} exit {code}: {log}. Fix the reported cause; rerun train to resume saved state, not to draw a new run.')
++def locks(a):
++    for family in FAMILIES:
++        for ds in COUNTS:
++            p=a.run_root/family/'runs'/ds/'fold_0';done=read(p/'ours_done.json');lk=p/'selection_lock.json'
++            assert sha(lk)==done['files']['selection_lock.json']
++            for n,h in read(lk)['artifacts'].items():assert sha(p/n)==h,(p,n)
++def train(a):
++    check(a)
++    if (a.run_root/'training_done.json').exists():
++        assert read(a.run_root/'training_done.json')['source_sha']==code_check();locks(a)
++        print('Training already locked; no model retrained. Existing evaluation status is preserved.',flush=True)
++        return
++    jobs=[]
++    for family in FAMILIES:
++        jobs.append((family,'prepare',['evidence_msa.text_present.runner','prepare']))
++        for ds in COUNTS:
++            mod=['evidence_msa.text_present.plain_worker','train'] if family=='enhanced_plain' else ['evidence_msa.text_present.train']
++            jobs.append((family,ds,mod+['--dataset',ds]))
++    execute(a,jobs,'training');locks(a);summarize(a,'valid')
++    save(a.run_root/'training_done.json',{'source_sha':code_check(),'smoke':a.smoke,'test_opened':False,'families':list(FAMILIES)})
++    save(a.run_root/'status.json',{'stage':'training_complete','variants':5,'datasets':2,'test_opened':False,'updated':time.time(),'smoke':a.smoke})
++def evaluate(a):
++    check(a);assert read(a.run_root/'training_done.json')['source_sha']==code_check();locks(a)
++    jobs=[(f,'evaluate',['evidence_msa.text_present.plain_worker' if f=='enhanced_plain' else 'evidence_msa.text_present.runner','evaluate']) for f in FAMILIES]
++    execute(a,jobs,'evaluating');summarize(a,'test')
++    save(a.run_root/'status.json',{'stage':'complete','variants':5,'datasets':2,'test_opened':True,'updated':time.time(),'smoke':a.smoke})
++def summarize(a,split):
++    import numpy as np
++    sys.path.insert(0,str(HERE/'src'))
++    from evidence_msa.common.metrics import scores
++    dest=a.run_root/'tables';dest.mkdir(exist_ok=True);rows=[];audit=[];refs={}
++    for ds in COUNTS:
++        for variant,(family,kind) in VARIANTS.items():
++            root=a.run_root/family;unit=root/'runs'/ds/'fold_0'
++            if split=='valid':p=unit/'validation_predictions.npz';prefix='final_' if kind=='final' else 'c5_'
++            else:
++                p=root/'evaluation'/ds/('predictions_c5_test.npz' if kind=='c5' and family!='enhanced_plain' else 'predictions_test.npz');prefix='pred_'
++                done=read(p.parent/'done.json');assert sha(unit/'selection_lock.json')==done['selection_lock_sha']
++                assert sha(p)==done['c5_predictions_sha' if p.name=='predictions_c5_test.npz' else 'predictions_sha']
++            with np.load(p,allow_pickle=False) as z:
++                ids=[str(x).replace('$_$','_') for x in z['ids']];y=z['y'].reshape(-1)
++                assert len(ids)==len(set(ids))==len(y)
++                if ds in refs:assert ids==refs[ds][0] and np.array_equal(y,refs[ds][1])
++                else:refs[ds]=(ids,y.copy())
++                for c in ('T','TA','TV'):
++                    computed=scores(y,z[prefix+c]);rows.append(dict(dataset=ds.upper(),variant=variant,condition=c,**{k:computed['metrics'][k] for k in METRICS},n=computed['n_all'],split=split,smoke=a.smoke))
++            audit.append({'variant':variant,'dataset':ds,'source':str(p),'sha256':sha(p),'selection_lock_sha':sha(unit/'selection_lock.json')})
++    def write(name,items):
++        with (dest/name).open('w',encoding='utf-8-sig',newline='') as f:w=csv.DictWriter(f,fieldnames=list(items[0]));w.writeheader();w.writerows(items)
++    write(split+'_results.csv',rows);means=[];deltas=[]
++    lookup={(r['dataset'],r['variant'],r['condition']):r for r in rows}
++    for ds in ('MOSI','MOSEI'):
++        for v in VARIANTS:
++            for label,conds in [('LA_LV',('TA','TV')),('L_LA_LV',('T','TA','TV'))]:
++                means.append(dict(dataset=ds,variant=v,conditions=label,**{k:None if any(lookup[(ds,v,c)][k] is None for c in conds) else float(np.mean([lookup[(ds,v,c)][k] for c in conds])) for k in METRICS}))
++        for newer,older in [('A1','A0'),('A2','A0'),('A3','A1'),('A3','A2'),('A1','A4')]:
++            for c in ('T','TA','TV'):
++                for k in METRICS:
++                    x=lookup[(ds,newer,c)][k];y=lookup[(ds,older,c)][k]
++                    deltas.append(dict(dataset=ds,contrast=newer+'-'+older,condition=c,metric=k,improvement=None if x is None or y is None else (y-x if k=='MAE' else x-y)))
++    write(split+'_means.csv',means);write(split+'_contrasts.csv',deltas)
++    save(dest/(split+'_audit.json'),{'rows':len(rows),'metrics':len(rows)*6,'sources':audit,'smoke':a.smoke,'historical_test_exposure':True,'independent_confirmation':False,'paired_core':'A0/A2 and A1/A3 use identical selected C5 checkpoint; no-ERU rows contain no ERU predictions','note':'A/V/AV not evaluated here; do not label three-condition mean as six-condition mean'})
++def main():
++    p=argparse.ArgumentParser();p.add_argument('action',choices=['check','train','evaluate','status','export']);p.add_argument('--data-root',type=Path,default=Path('/root/autodl-tmp/MSA_Cloud_20261115/data'));p.add_argument('--run-root',type=Path,default=HERE/'outputs/formal');p.add_argument('--smoke',action='store_true');a=p.parse_args();a.data_root=a.data_root.resolve();a.run_root=a.run_root.resolve()
++    if a.smoke and 'smoke' not in a.run_root.name.lower():p.error('Synthetic smoke output directory must contain smoke')
++    if a.action=='status':
++        print(json.dumps(read(a.run_root/'status.json'),ensure_ascii=False,indent=2));return
++    if a.action=='check':check(a);return
++    if a.action=='export':
++        import zipfile
++        status=read(a.run_root/'status.json');assert status['stage'] in ('training_complete','complete')
++        target=a.run_root/'ablation_results.zip'
++        with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED) as z:
++            for file in a.run_root.rglob('*'):
++                if not file.is_file() or file==target:continue
++                if file.suffix in ('.json','.csv') or file.name in ('validation_predictions.npz','predictions_test.npz','predictions_c5_test.npz'):z.write(file,file.relative_to(a.run_root))
++        (target.with_suffix('.zip.sha256')).write_text(sha(target)+'  '+target.name+'\n');print(target);return
++    a.run_root.mkdir(parents=True,exist_ok=True);sys.path.insert(0,str(HERE/'src'))
++    from evidence_msa.common.checkpoint import lock
++    with lock(a.run_root/'ablation_queue.lock'):
++        try:train(a) if a.action=='train' else evaluate(a)
++        except Exception as e:
++            save(a.run_root/'error.json',{'error':repr(e),'time':time.time(),'action':a.action})
++            save(a.run_root/'status.json',{'stage':'failed','error':repr(e),'updated':time.time(),'action':a.action,'smoke':a.smoke});raise
++if __name__=='__main__':main()
+--- original/src/evidence_msa/input_views.py
++++ ablation/src/evidence_msa/input_views.py
+@@ -0,0 +1,11 @@
++"""Remove enhanced information before fitting transforms, including R3 inputs."""
++import numpy as np
++from .settings import INPUT_MODE
++ENHANCED=('A_words','V_lip','V_words','V_expression','V_quality','V_timeline')
++def select_inputs(data,mode=None):
++    mode=INPUT_MODE if mode is None else mode
++    assert mode in ('native','enhanced')
++    out=dict(data)
++    if mode=='native':
++        for key in ENHANCED:out[key]=np.zeros_like(data[key])
++    return out
+--- original/src/evidence_msa/settings.py
++++ ablation/src/evidence_msa/settings.py
+@@ -1,5 +1,11 @@
+ """Runtime locations only; algorithm parameters remain in the frozen protocol."""
+ import os
++INPUT_MODE = os.environ.get("MSA_INPUT_MODE", "enhanced")
++BACKBONE = os.environ.get("MSA_BACKBONE", "c5")
++SMOKE = os.environ.get("MSA_SMOKE", "0") == "1"
++DEVICE = os.environ.get("MSA_DEVICE", "cuda")
++assert INPUT_MODE in ("native", "enhanced") and BACKBONE in ("c5", "simple")
++assert DEVICE == "cuda" or (DEVICE == "cpu" and SMOKE), "CPU is reserved for synthetic smoke checks"
+ from pathlib import Path
+ PROJECT = Path(__file__).resolve().parents[2]
+ DATA_ROOT = Path(os.environ.get('MSA_DATA_ROOT', PROJECT / 'data')).expanduser().resolve()
+--- original/src/evidence_msa/text_present/calibration.py
++++ ablation/src/evidence_msa/text_present/calibration.py
+@@ -11,6 +11,8 @@
+ import numpy as np
+ import torch
+ from torch import nn
++
++from ..settings import DEVICE, SMOKE
+ 
+ CS = ('T', 'TA', 'TV')
+ 
+@@ -132,7 +134,7 @@
+         h.update(k.encode()); h.update(str((a.dtype.str, a.shape)).encode()); h.update(a.tobytes())
+     return h.hexdigest()
+ 
+-def fit_postprocessors(train_z, valid_z, valid_fold_mean, output_dir, rank_fn, status_fn=None, device='cuda'):
++def fit_postprocessors(train_z, valid_z, valid_fold_mean, output_dir, rank_fn, status_fn=None, device=DEVICE):
+     """Return portable CPU state. rank_fn(predictions, y) -> scalar, larger better.
+ 
+     status_fn, if supplied, receives one dict. Valid/held scores are never printed.
+@@ -163,7 +165,7 @@
+     t = torch.tensor(train_z['pred_T'], dtype=torch.float32, device=device)
+     inc = {c: torch.tensor(train_z['pred_'+c]-train_z['pred_T'], dtype=torch.float32, device=device) for c in ('TA', 'TV')}
+     start, best = resume(gates, opt, out/'gate_last.pt', device)
+-    for epoch in range(start, 31):
++    for epoch in range(start, 2 if SMOKE else 31):
+         if epoch:
+             gates.train()
+             for ix in torch.randperm(len(y), device=device).split(128):
+@@ -187,7 +189,7 @@
+     lo, hi, lg = [torch.tensor(np.concatenate([v[j] for v in blocks]), device=device) for j in (1, 2, 3)]
+     Y = torch.tensor(np.tile(train_z['y'], 3), dtype=torch.float64, device=device)
+     intensity = Intensity().to(device); selections = {}
+-    for name, epochs, lr in (('smooth_intensity', 40, .001), ('median_intensity', 20, .0002)):
++    for name, epochs, lr in (('smooth_intensity', 1 if SMOKE else 40, .001), ('median_intensity', 1 if SMOKE else 20, .0002)):
+         opt = torch.optim.AdamW(intensity.parameters(), lr=lr, weight_decay=.01)
+         start, best = resume(intensity, opt, out/(name+'_last.pt'), device)
+         for epoch in range(start, epochs+1):
+@@ -212,7 +214,7 @@
+     return state
+ 
+ @torch.no_grad()
+-def apply_postprocessors(z, fold_mean, state, device='cuda'):
++def apply_postprocessors(z, fold_mean, state, device=DEVICE):
+     """Label-free inference through D23; root applies frozen D24 factor anchor."""
+     gates = nn.ModuleDict({c: Gate() for c in ('TA', 'TV')}).to(device); gates.load_state_dict(state['gate_model'])
+     intensity = Intensity().to(device); intensity.load_state_dict(state['intensity_model'])
+--- original/src/evidence_msa/text_present/data.py
++++ ablation/src/evidence_msa/text_present/data.py
+@@ -9,6 +9,7 @@
+ from sklearn.linear_model import Ridge
+ from sklearn.model_selection import GroupKFold
+ from ..settings import RUN_ROOT as ROOT, DATA_ROOT
++from ..input_views import select_inputs
+ SOURCE=DATA_ROOT/'ready'
+ KEYS=('T','A_native','A_words','V_native','V_lip','V_words','V_expression','V_quality','V_timeline')
+ MODEL_KEYS=('T','A','V','AS','VS','Q','timeline')
+@@ -37,7 +38,7 @@
+         for split in ('train', 'valid'):
+             path = SOURCE/ds/(split+'.npz')
+             with np.load(path, allow_pickle=False) as z:
+-                splits.append({k:np.array(z[k]) for k in KEYS+LABEL_KEYS})
++                splits.append(select_inputs({k:np.array(z[k]) for k in KEYS+LABEL_KEYS}))
+             sources[split] = {'path':str(path), 'sha256':sha(path)}
+         for k in ('ids', 'groups'):
+             for d in splits: d[k] = _normalize(d[k])
+--- original/src/evidence_msa/text_present/plain_worker.py
++++ ablation/src/evidence_msa/text_present/plain_worker.py
+@@ -0,0 +1,48 @@
++"""A4 only: same loss/selection/40 epochs, no ERU fitting or inference."""
++import argparse,gc
++import numpy as np
++import torch
++from .protocol import *
++from . import data as cv_data
++from .runner import transform_test
++from ..input_views import select_inputs
++from .train import fresh_core,fit_component,predict,npz
++def train(ds):
++    from .supervisor import check_code
++    check_code();configure();assert BACKBONE=='simple';ensure_policy()
++    out=ROOT/'runs'/ds/'fold_0';out.mkdir(parents=True,exist_ok=True)
++    with lock(out/'ours.lock'):
++        if (out/'ours_done.json').exists():
++            for n,h in read(out/'selection_lock.json')['artifacts'].items():assert sha(out/n)==h
++            return
++        m=read(ROOT/'manifests'/ds/'fold_0.json');data,dims=cv_data.prepare(ds,m['train_indices'],{'valid':m['valid_indices']},out/'prep_main')
++        model,epoch=fit_component(fresh_core(dims),'C5',data['train'],data['valid'],out/'main/C5',1 if SMOKE else 40,lambda p:p)
++        ps=predict(model,data['valid'],'C5');npz(out/'validation_predictions.npz',dict(ids=data['valid']['ids'],y=data['valid']['y'],**{'c5_'+c:ps[c] for c in CS}))
++        save(out/'parameters.json',model.parameter_match)
++        names=['main/C5/best.pt','prep_main/scalers.joblib','prep_main/A_shared.joblib','prep_main/V_shared.joblib']
++        save(out/'selection_lock.json',dict(artifacts={n:sha(out/n) for n in names},selected_epoch=epoch,policy_sha=ensure_policy(),held_used=False))
++        save(out/'ours_done.json',dict(files={'selection_lock.json':sha(out/'selection_lock.json')},test_opened=False))
++        del model,data;gc.collect();cv_data.cleanup_arrays(out/'prep_main');status(out,'training_complete',dataset=ds,test_opened=False)
++def evaluate():
++    from .supervisor import check_code
++    check_code();configure()
++    for ds in ('mosi','mosei'):
++        out=ROOT/'runs'/ds/'fold_0'
++        for n,h in read(out/'selection_lock.json')['artifacts'].items():assert sha(out/n)==h
++    for ds in ('mosi','mosei'):
++        out=ROOT/'runs'/ds/'fold_0';dest=ROOT/'evaluation'/ds;dest.mkdir(parents=True,exist_ok=True)
++        if (dest/'done.json').exists():
++            done=read(dest/'done.json');assert sha(dest/'predictions_test.npz')==done['predictions_sha'];continue
++        source=cv_data.SOURCE/ds/'test.npz'
++        with np.load(source,allow_pickle=False) as f:d=select_inputs({k:np.array(f[k]) for k in cv_data.KEYS+('ids','groups')})
++        for k in ('ids','groups'):d[k]=cv_data._normalize(d[k])
++        hd=transform_test(d,out/'prep_main',dest/'features');dims=read(out/'prep_main/data_complete.json')['dims'];model=fresh_core(dims);model.load_state_dict(loadck(out/'main/C5/best.pt')['model'])
++        ps=predict(model,hd,'C5');npz(dest/'locked_predictions.npz',dict(ids=d['ids'],**{'pred_'+c:ps[c] for c in CS}))
++        with np.load(source,allow_pickle=False) as f:y=np.array(f['y'])
++        npz(dest/'predictions_test.npz',dict(ids=d['ids'],y=y,**{'pred_'+c:ps[c] for c in CS}))
++        save(dest/'done.json',dict(predictions_sha=sha(dest/'predictions_test.npz'),test_sha=sha(source),selection_lock_sha=sha(out/'selection_lock.json'),historical_test_exposure=True,independent_confirmation=False))
++        del model,hd,d;gc.collect()
++        for p in (dest/'features').glob('*.npy'):p.unlink()
++if __name__=='__main__':
++    p=argparse.ArgumentParser();p.add_argument('action',choices=['train','evaluate']);p.add_argument('--dataset',choices=['mosi','mosei']);a=p.parse_args()
++    train(a.dataset) if a.action=='train' else evaluate()
+--- original/src/evidence_msa/text_present/protocol.py
++++ ablation/src/evidence_msa/text_present/protocol.py
+@@ -5,7 +5,7 @@
+ from pathlib import Path
+ import numpy as np
+ import torch
+-from ..settings import RUN_ROOT as ROOT
++from ..settings import RUN_ROOT as ROOT, DEVICE, SMOKE, INPUT_MODE, BACKBONE
+ from ..common.metrics import scores
+ from ..common.checkpoint import tsave,loadck,state_cpu,rng_state,restore_rng,lock
+ CS=('T','TA','TV')
+@@ -38,6 +38,8 @@
+ 
+ POLICY.update(experiment='frozen D24-R3 original-split fresh retraining', methods=['C5','D24-R3'], outer_folds=0, outer_split='original train/valid/test', inner_validation='original valid only', outer_scores='single original test after both dataset selection locks', stopping='complete both fixed dataset jobs once', R3=dict(radius=.1, confidence=.1, regularization=.001, epsilon=1e-4), report='original test benchmark; historical test exposure remains; not independent confirmation')
+ 
++POLICY.update(ablation_package='cloud_ablation_20261123',input_mode=INPUT_MODE,backbone=BACKBONE,synthetic_smoke=SMOKE,device=DEVICE)
++
+ def save(p,obj):
+     p=Path(p);p.parent.mkdir(parents=True,exist_ok=True)
+     tmp=p.with_suffix('.tmp');tmp.write_text(json.dumps(obj,ensure_ascii=False,indent=2,allow_nan=False),encoding='utf-8');os.replace(tmp,p)
+@@ -68,7 +70,9 @@
+     return float(np.average(values,weights=weights))
+ 
+ def configure():
+-    assert torch.cuda.is_available(),'CUDA required for these local training jobs'
++    if DEVICE == 'cpu':
++        torch.set_num_threads(2); return
++    assert torch.cuda.is_available(),'CUDA required for formal cloud training'
+     torch.set_num_threads(4)
+     torch.backends.cuda.matmul.allow_tf32=False
+     torch.backends.cudnn.allow_tf32=True
+@@ -86,7 +90,7 @@
+ def move_opt(opt):
+     for s in opt.state.values():
+         for k,v in s.items():
+-            if torch.is_tensor(v):s[k]=v.cuda()
++            if torch.is_tensor(v):s[k]=v.to(DEVICE)
+ 
+ def local_unlink(p):
+     # Only disposable files generated by this CV, never parent experiment artifacts.
+--- original/src/evidence_msa/text_present/runner.py
++++ ablation/src/evidence_msa/text_present/runner.py
+@@ -8,6 +8,7 @@
+ from threadpoolctl import threadpool_limits
+ from .protocol import *
+ from . import data as cv_data
++from ..input_views import select_inputs
+ 
+ def raw(d,ix,c):
+     keys={'T':('T',),'TA':('T','A_native','A_words'),'TV':('T','V_native','V_expression','V_lip','V_words','V_quality')}[c]
+@@ -72,7 +73,7 @@
+         source=cv_data.SOURCE/ds/'test.npz'
+         # Features only until all fixed predictions have been produced.
+         with np.load(source,allow_pickle=False) as f:d={k:np.array(f[k]) for k in cv_data.KEYS+('ids','groups')}
+-        d['ids']=cv_data._normalize(d['ids']);dims=read(out/'prep_main/data_complete.json')['dims']
++        d=select_inputs(d);d['groups']=cv_data._normalize(d['groups']);d['ids']=cv_data._normalize(d['ids']);dims=read(out/'prep_main/data_complete.json')['dims']
+         hd=transform_test(d,out/'prep_main',dest/'main_features')
+         core=fresh_core(dims);core.load_state_dict(loadck(out/'main/C5/best.pt')['model']);c5=predict(core,hd,'C5');del core
+         models=load_composite(dims,out/'main');z=composite(models,hd);del models;gc.collect();torch.cuda.empty_cache()
+@@ -84,16 +85,17 @@
+             for p in temp.glob('*.npy'):p.unlink()
+         mean={c:np.mean([v[c] for v in subpred],axis=0) for c in CS}
+         post=loadpost(out/'post/complete.pt');b=apply_postprocessors(z,mean,post)
+-        factor=FactorAnchor(dims['T']).cuda();factor.load_state_dict(loadck(out/'factor/best.pt')['model'])
++        factor=FactorAnchor(dims['T']).to(DEVICE);factor.load_state_dict(loadck(out/'factor/best.pt')['model'])
+         p24=blend_factor(b,predict(factor,hd,'factor')['pred']);clfs=joblib.load(out/'polarity.joblib')
+         final={c:repair(p24[c],clfs[c].predict_proba(raw(d,slice(None),c))[:,1]) for c in CS}
+         npz(dest/'locked_predictions.npz',dict(ids=d['ids'],**{'pred_'+c:final[c] for c in CS}))
+         with np.load(source,allow_pickle=False) as f:y=np.array(f['y'])
++        npz(dest/'predictions_c5_test.npz',dict(ids=d['ids'],y=y,**{'pred_'+c:c5[c] for c in CS}))
+         result=[]
+         for method,ps in [('C5_fresh',c5),('Ours_D24_R3_fresh',final)]:
+             for c in CS:result.append(dict(dataset=ds,method=method,condition=c,metrics=scores(y,ps[c])['metrics']))
+         npz(dest/'predictions_test.npz',dict(ids=d['ids'],y=y,**{'pred_'+c:final[c] for c in CS}))
+-        save(dest/'results.json',result);save(dest/'done.json',dict(results_sha=sha(dest/'results.json'),test_sha=sha(source),selection_lock_sha=sha(out/'selection_lock.json'),historical_test_exposure=True,independent_confirmation=False))
++        save(dest/'results.json',result);save(dest/'done.json',dict(predictions_sha=sha(dest/'predictions_test.npz'),c5_predictions_sha=sha(dest/'predictions_c5_test.npz'),results_sha=sha(dest/'results.json'),test_sha=sha(source),selection_lock_sha=sha(out/'selection_lock.json'),historical_test_exposure=True,independent_confirmation=False))
+         reports.extend(result);del hd,d,factor;gc.collect();torch.cuda.empty_cache()
+         for p in (dest/'main_features').glob('*.npy'):p.unlink()
+     save(ROOT/'results.json',reports)
+--- original/src/evidence_msa/text_present/simple_fusion.py
++++ ablation/src/evidence_msa/text_present/simple_fusion.py
+@@ -0,0 +1,25 @@
++"""Matched-encoder concatenation control: no shared/residual split, attention or ERU."""
++import torch
++from torch import nn
++from .model import TextPresent
++class SimpleFusion(TextPresent):
++    def __init__(self,dims,config,h=128):
++        # Keep the identical text/audio/visual encoders and 8-output distribution head.
++        target=sum(p.numel() for p in TextPresent(dims,config,h).parameters())
++        super().__init__(dims,{**config,'shared':False,'attention':False},h)
++        del self.correct;del self.gate
++        fixed=sum(p.numel() for p in self.parameters())
++        # Match the removed parameter budget with one concatenation MLP, not extra evidence.
++        width=max(16,round((target-fixed-8)/(2*h+11)))
++        self.concat=nn.Sequential(nn.Linear(2*h,width),nn.LayerNorm(width),nn.GELU(),nn.Dropout(.2),nn.Linear(width,8))
++        self.parameter_match={'c5_parameters':target,'simple_parameters':sum(p.numel() for p in self.parameters()),'concat_width':width}
++    def forward(self,b,condition):
++        if condition not in ('T','TA','TV'):raise ValueError(condition)
++        t=self.text(b['T'])
++        if condition=='T':raw=self.base(t)
++        else:
++            if condition=='TA':e=self.audio(b['A'])
++            else:e=self.visual({**b,'VS':torch.zeros_like(b['V'])})
++            raw=self.concat(torch.cat((t,e),-1))
++        logits=raw[:,:7];pred=((logits.softmax(-1)*self.levels).sum(-1)+.5*raw[:,7].tanh()).clamp(-3,3)
++        return {'pred':pred,'logits':logits}
+--- original/src/evidence_msa/text_present/train.py
++++ ablation/src/evidence_msa/text_present/train.py
+@@ -18,7 +18,7 @@
+ from . import data as cv_data
+ 
+ KEYS=('T','A','AS','V','VS','timeline','Q')
+-def batch(d,ix):return {k:torch.tensor(np.array(d[k][ix]),device='cuda',dtype=torch.float32) for k in KEYS}
++def batch(d,ix):return {k:torch.tensor(np.array(d[k][ix]),device=DEVICE,dtype=torch.float32) for k in KEYS}
+ 
+ @torch.no_grad()
+ def predict(model,d,kind):
+@@ -28,7 +28,7 @@
+             b=batch(d,slice(i,i+64))
+             for c in CS:out[c].append(model(b,c)['pred'].cpu().numpy().astype('float64'))
+         else:
+-            o=model(torch.tensor(np.array(d['T'][i:i+64]),device='cuda'))
++            o=model(torch.tensor(np.array(d['T'][i:i+64]),device=DEVICE))
+             out['pred'].append(o['pred'].cpu().numpy().astype('float64'))
+             if 'logits' in o:out['prob'].append(o['logits'].softmax(-1).cpu().numpy())
+     return {k:np.concatenate(v) for k,v in out.items() if len(v)}
+@@ -68,14 +68,14 @@
+     for epoch in range(start,epochs):
+         began=time.time();model.train();total=0.
+         for ix in torch.randperm(len(tr['T'])).split(bs):
+-            ix=ix.numpy();y=torch.tensor(np.array(tr['y'][ix]),device='cuda',dtype=torch.float32);opt.zero_grad(set_to_none=True)
++            ix=ix.numpy();y=torch.tensor(np.array(tr['y'][ix]),device=DEVICE,dtype=torch.float32);opt.zero_grad(set_to_none=True)
+             if kind in ('C5','D5'):
+                 b=batch(tr,ix);value=0.
+                 for c in CS:
+                     loss=objective(model(b,c),y,CONFIG)/3
+                     assert torch.isfinite(loss);loss.backward();value+=float(loss.detach())
+             else:
+-                o=model(torch.tensor(np.array(tr['T'][ix]),device='cuda'))
++                o=model(torch.tensor(np.array(tr['T'][ix]),device=DEVICE))
+                 loss=cell_objective(o,y) if kind=='cell' else (factor_loss(o,y) if kind=='factor' else objective(o,y,CONFIG))
+                 assert torch.isfinite(loss);loss.backward();value=float(loss.detach())
+             norm=torch.nn.utils.clip_grad_norm_(parameters,5.);assert torch.isfinite(norm)
+@@ -95,8 +95,11 @@
+     save(folder/'done.json',dict(sha256=sha(folder/'best.pt'),selected_epoch=best_epoch,inner_utility=None if fixed else best_rank))
+     local_unlink(folder/'last.pt');return model,best_epoch
+ 
+-def fresh_core(dims):return TextPresent(dims,CONFIG,128).cuda()
+-def d5_from(core,dims):return RawEvidenceAdapter(dict(model=state_cpu(core),dims=dims,config=CONFIG,hidden=128),'D5_bilinear').cuda()
++def fresh_core(dims):
++    from ..settings import BACKBONE
++    from .simple_fusion import SimpleFusion
++    return (SimpleFusion(dims,CONFIG,128) if BACKBONE=='simple' else TextPresent(dims,CONFIG,128)).to(DEVICE)
++def d5_from(core,dims):return RawEvidenceAdapter(dict(model=state_cpu(core),dims=dims,config=CONFIG,hidden=128),'D5_bilinear').to(DEVICE)
+ 
+ @torch.no_grad()
+ def composite(models,d):
+@@ -120,22 +123,22 @@
+ 
+ def train_composite(dims,data,folder,budgets=None):
+     tr=data['train'];va=data.get('valid');fixed=budgets is not None
+-    budgets=dict(C5=40,D5=20,anchor=40,cell=40) if budgets is None else budgets
++    budgets=(dict(C5=1,D5=1,anchor=1,cell=1) if SMOKE else dict(C5=40,D5=20,anchor=40,cell=40)) if budgets is None else budgets
+     core,e0=fit_component(fresh_core(dims),'C5',tr,va,folder/'C5',budgets['C5'],lambda x:x,fixed)
+     model,e1=fit_component(d5_from(core,dims),'D5',tr,va,folder/'D5',budgets['D5'],lambda x:x,fixed)
+     # Persist C5 separately as the comparator; D5 has its own frozen copy.
+     del core;gc.collect();torch.cuda.empty_cache()
+     base=None if fixed else predict(model,va,'D5')
+-    a,e2=fit_component(TextAnchor(dims['T']).cuda(),'anchor',tr,va,folder/'anchor',budgets['anchor'],None if fixed else lambda x:blend_anchor(base,x['pred']),fixed)
++    a,e2=fit_component(TextAnchor(dims['T']).to(DEVICE),'anchor',tr,va,folder/'anchor',budgets['anchor'],None if fixed else lambda x:blend_anchor(base,x['pred']),fixed)
+     b2=None if fixed else blend_anchor(base,predict(a,va,'anchor')['pred'])
+-    c,e3=fit_component(CellTextAnchor(dims['T']).cuda(),'cell',tr,va,folder/'cell',budgets['cell'],None if fixed else lambda x:blend_cell(b2,x),fixed)
++    c,e3=fit_component(CellTextAnchor(dims['T']).to(DEVICE),'cell',tr,va,folder/'cell',budgets['cell'],None if fixed else lambda x:blend_cell(b2,x),fixed)
+     return (model,a,c),dict(C5=e0,D5=e1,anchor=e2,cell=e3)
+ 
+ def load_composite(dims,folder):
+     core=fresh_core(dims);core.load_state_dict(loadck(folder/'C5/best.pt')['model'])
+     m=d5_from(core,dims);m.load_state_dict(loadck(folder/'D5/best.pt')['model']);del core
+-    a=TextAnchor(dims['T']).cuda();a.load_state_dict(loadck(folder/'anchor/best.pt')['model'])
+-    c=CellTextAnchor(dims['T']).cuda();c.load_state_dict(loadck(folder/'cell/best.pt')['model'])
++    a=TextAnchor(dims['T']).to(DEVICE);a.load_state_dict(loadck(folder/'anchor/best.pt')['model'])
++    c=CellTextAnchor(dims['T']).to(DEVICE);c.load_state_dict(loadck(folder/'cell/best.pt')['model'])
+     for x in (m,a,c):x.eval()
+     return m,a,c
+ 
+@@ -190,7 +193,7 @@
+             status(out,stage,dataset=ds,fold=fold,**record)
+         state=fit_postprocessors(oof,zv,foldmean,out/'post',utility,report_post)
+         base=apply_postprocessors(zv,foldmean,state)
+-        factor,_=fit_component(FactorAnchor(dims['T']).cuda(),'factor',tr,data['valid'],out/'factor',40,lambda x:blend_factor(base,x['pred']))
++        factor,_=fit_component(FactorAnchor(dims['T']).to(DEVICE),'factor',tr,data['valid'],out/'factor',1 if SMOKE else 40,lambda x:blend_factor(base,x['pred']))
+         locked={str(p.relative_to(out)):sha(p) for p in sorted(out.rglob('best.pt'))}
+         locked.update({str(p.relative_to(out)):sha(p) for p in sorted(out.rglob('*shared.joblib'))})
+         locked.update({str(p.relative_to(out)):sha(p) for p in sorted(out.rglob('scalers.joblib'))})
+@@ -199,6 +202,16 @@
+         # Fresh polarity classifier fitted only to original training labels.
+         from .runner import fit_polarity
+         fit_polarity(ds,fit,out)
++        # Paired ablation: the no-ERU row is exactly this full run's frozen C5.
++        from .runner import repair,raw
++        import joblib
++        core=fresh_core(dims);core.load_state_dict(loadck(out/'main/C5/best.pt')['model'])
++        pc=predict(core,data['valid'],'C5');q=blend_factor(base,predict(factor,data['valid'],'factor')['pred'])
++        clfs=joblib.load(out/'polarity.joblib');source=cv_data.pool(ds)
++        final={c:repair(q[c],clfs[c].predict_proba(raw(source,valid,c))[:,1]) for c in CS}
++        npz(out/'validation_predictions.npz',dict(ids=data['valid']['ids'],y=data['valid']['y'],**{'c5_'+c:pc[c] for c in CS},**{'final_'+c:final[c] for c in CS}))
++        save(out/'parameters.json',dict(c5_parameters=sum(p.numel() for p in core.parameters()),eru_enabled=True,crossfit_members=4))
++        del core,source
+         locked.update({'polarity.joblib':sha(out/'polarity.joblib')})
+         save(out/'selection_lock.json',dict(artifacts=locked,manifest_sha=sha(ROOT/'manifests'/ds/('fold_'+str(fold)+'.json')),policy_sha=ensure_policy(),held_used=False))
+         save(out/'ours_done.json',dict(files={'selection_lock.json':sha(out/'selection_lock.json')},test_opened=False))
+--- original/tests/make_smoke_data.py
++++ ablation/tests/make_smoke_data.py
+@@ -0,0 +1,13 @@
++"""Synthetic fixture only: no benchmark score can be reported from this data."""
++import argparse,json
++from pathlib import Path
++import numpy as np
++p=argparse.ArgumentParser();p.add_argument('destination',type=Path);a=p.parse_args()
++for ds in ('mosi','mosei'):
++    out=a.destination/'ready'/ds;out.mkdir(parents=True,exist_ok=True)
++    for split,n in [('train',24),('valid',12),('test',12)]:
++        d={k:np.random.normal(size=(n,dim)).astype('float32') for k,dim in [('T',8),('A_native',5),('A_words',4),('V_native',6),('V_expression',3),('V_lip',4),('V_words',4),('V_quality',2)]}
++        d['V_timeline']=np.random.normal(size=(n,4,3)).astype('float32');d['y']=np.tile(np.array([-1.5,.5,1.5],dtype='float32'),n//3)
++        d['ids']=np.array([f'{ds}_{split}_{i}' for i in range(n)]);d['groups']=np.array([f'{ds}_{split}_video_{i//3}' for i in range(n)])
++        np.savez_compressed(out/(split+'.npz'),**d)
++print(a.destination)
+--- original/tests/test_ablation_contract.py
++++ ablation/tests/test_ablation_contract.py
+@@ -0,0 +1,38 @@
++import importlib.util,json,sys,unittest
++from pathlib import Path
++import numpy as np
++import torch
++ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'src'))
++from evidence_msa.input_views import select_inputs,ENHANCED
++from evidence_msa.text_present.model import TextPresent,objective
++from evidence_msa.text_present.simple_fusion import SimpleFusion
++CFG=dict(shared=True,attention=True,distribution=True,polarity=True)
++DIMS=dict(T=8,A=9,V=17,app=9,timeline=3,Q=2)
++class Contracts(unittest.TestCase):
++    def test_native_removes_all_extra_channels_before_transforms(self):
++        d={k:np.random.randn(3,5).astype('float32') for k in ENHANCED+('T','A_native','V_native')}
++        n=select_inputs(d,'native');e=select_inputs(d,'enhanced')
++        for k in ENHANCED:self.assertTrue(np.all(n[k]==0));self.assertTrue(np.array_equal(e[k],d[k]))
++        for k in ('T','A_native','V_native'):self.assertTrue(np.array_equal(n[k],d[k]))
++    def test_core_and_simple_missing_modality_isolation_and_backward(self):
++        torch.set_num_threads(2)
++        for cls in (TextPresent,SimpleFusion):
++            m=cls(DIMS,CFG,128).eval()
++            b={k:torch.randn(3,d) for k,d in [('T',8),('A',9),('AS',9),('V',17),('VS',17),('Q',2)]};b['timeline']=torch.randn(3,4,3)
++            for c in ('T','TA','TV'):
++                hidden=('A','AS','V','VS','Q','timeline') if c=='T' else (('V','VS','Q','timeline') if c=='TA' else ('A','AS'))
++                altered={k:v.clone() for k,v in b.items()}
++                for k in hidden:altered[k].normal_()
++                self.assertTrue(torch.equal(m(b,c)['pred'],m(altered,c)['pred']))
++                loss=objective(m(b,c),torch.tensor([-1.,0.,1.]),CFG);self.assertTrue(torch.isfinite(loss));m.zero_grad();loss.backward()
++                self.assertTrue(all(torch.isfinite(p.grad).all() for p in m.parameters() if p.grad is not None))
++            if cls is SimpleFusion:
++                self.assertFalse(hasattr(m,'shared_a'));self.assertFalse(hasattr(m,'interaction'));self.assertFalse(hasattr(m,'correct'))
++                a=m.parameter_match;self.assertLess(abs(a['c5_parameters']-a['simple_parameters'])/a['c5_parameters'],.005)
++    def test_native_policy_and_no_seed_calls(self):
++        import ast
++        for path in (ROOT/'src').rglob('*.py'):
++            tree=ast.parse(path.read_text(encoding='utf-8'))
++            for n in ast.walk(tree):
++                if isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute):self.assertNotIn(n.func.attr,('manual_seed','manual_seed_all','seed'),str(path))
++if __name__=='__main__':unittest.main()

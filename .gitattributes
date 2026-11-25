@@ -4,3 +4,4 @@
 *.json text eol=lf
 *.sh text eol=lf
 archive/** -text whitespace=cr-at-eol
+experiments/** -text whitespace=cr-at-eol

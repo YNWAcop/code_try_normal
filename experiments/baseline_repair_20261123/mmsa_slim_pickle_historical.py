@@ -1,0 +1,47 @@
+"""Read legacy numpy pickle without retaining large textual feature tensors.
+
+Only numeric ndarray payloads with last dimension 768 are skipped; metadata and
+other arrays preserve their values. Pure-Python pickle dispatch permits bounded
+chunk reads instead of allocating multi-GB text buffers. No file is modified.
+"""
+import pickle,struct
+import numpy as np
+class Skipped:
+    def __init__(self,n):self.n=n
+class ArrayProxy:
+    def __init__(self,*args):self.array=None;self.shape=None;self.dtype=None
+    def __setstate__(self,state):
+        version,shape,dtype,fortran,data=state;self.shape=shape;self.dtype=dtype
+        if isinstance(data,Skipped):return
+        if isinstance(data,bytes) and not dtype.hasobject:
+            self.array=np.frombuffer(data,dtype=dtype).reshape(shape,order='F' if fortran else 'C')
+        else:
+            arr=np.empty(0,dtype=np.uint8);arr.__setstate__(state);self.array=arr
+class SlimUnpickler(pickle._Unpickler):
+    dispatch=pickle._Unpickler.dispatch.copy()
+    def find_class(self,module,name):
+        if module in ('numpy.core.multiarray','numpy._core.multiarray') and name=='_reconstruct':return ArrayProxy
+        return super().find_class(module,name)
+    def payload(self,n):
+        shape=self.stack[-3] if len(self.stack)>=3 else None
+        skip=isinstance(shape,tuple) and len(shape)>=2 and shape[-1]==768 and n>10000000
+        if skip:
+            remaining=n
+            while remaining:
+                block=self.read(min(1048576,remaining))
+                if not block:raise EOFError('Incomplete ndarray payload')
+                remaining-=len(block)
+            self.append(Skipped(n))
+        else:self.append(self.read(n))
+    def load_binbytes(self):self.payload(struct.unpack('<I',self.read(4))[0])
+    def load_binbytes8(self):self.payload(struct.unpack('<Q',self.read(8))[0])
+    dispatch[pickle.BINBYTES[0]]=load_binbytes
+    dispatch[pickle.BINBYTES8[0]]=load_binbytes8
+def unwrap(x):return x.array if isinstance(x,ArrayProxy) else x
+def load_fields(path, fields, splits=('train','valid','test'), audit_test_ids=False):
+    with open(path,'rb') as f:raw=SlimUnpickler(f).load()
+    out={s:{k:unwrap(raw[s][k]) for k in fields} for s in splits}
+    assert all(v is not None for d in out.values() for v in d.values())
+    if audit_test_ids:
+        out['_audit_test_ids'] = unwrap(raw['test']['id'])
+    return out

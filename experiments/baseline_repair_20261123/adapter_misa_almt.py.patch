@@ -1,0 +1,68 @@
+--- historical/adapter_misa_almt.py
++++ repair/adapter_misa_almt.py
+@@ -24,8 +24,8 @@
+ class InputDataset(Dataset):
+     def __init__(self, split):
+         self.text = np.asarray(split['text_bert'], dtype=np.float32)
+-        self.audio = np.asarray(split['audio'], dtype=np.float32)
+-        self.vision = np.asarray(split['vision'], dtype=np.float32)
++        self.audio = split['audio']
++        self.vision = split['vision']
+         self.ids = split['id']
+         self.labels = np.asarray(split['regression_labels'], dtype=np.float32)
+         self.audio_lengths = np.asarray(split['audio_lengths'], dtype=np.int64)
+@@ -33,8 +33,8 @@
+     def __len__(self): return len(self.ids)
+     def __getitem__(self, i):
+         return {'text': torch.from_numpy(self.text[i].copy()),
+-                'audio': torch.from_numpy(np.nan_to_num(self.audio[i], copy=True)),
+-                'vision': torch.from_numpy(np.nan_to_num(self.vision[i], copy=True)), 'id': str(self.ids[i]),
++                'audio': torch.from_numpy(np.nan_to_num(np.asarray(self.audio[i],dtype=np.float32), copy=True)),
++                'vision': torch.from_numpy(np.nan_to_num(np.asarray(self.vision[i],dtype=np.float32), copy=True)), 'id': str(self.ids[i]),
+                 'audio_lengths': int(self.audio_lengths[i]), 'vision_lengths': int(self.vision_lengths[i]),
+                 'labels': {'M': torch.tensor(self.labels[i])}}
+ 
+@@ -66,7 +66,7 @@
+         p.error('whole condition must be A,V,T,AV,AT/TA,TV/VT')
+     if cli.protocol == 'frame' and not any(abs(cli.rate-r/10)<1e-8 for r in range(1,8)):
+         p.error('frame rate must be 0.1 through 0.7')
+-    if cli.batch_size is not None and cli.batch_size < 2: p.error('batch size must be >=2 (MISA BatchNorm)')
++    if cli.batch_size is not None and cli.batch_size < 2: p.error('batch size must be >=2 for batch-distribution losses')
+     out = cli.out.resolve()
+     if ((out/'validation_lock.json').exists() or (out/'best.pt').exists()) and not cli.evaluate_only:
+         raise RuntimeError(f'Refusing overwrite completed/checkpoint run: {out}')
+@@ -88,7 +88,9 @@
+     # Missing seed fields in upstream config are unused and removed to prevent confusion.
+     args.pop('missing_seed', None)
+     args.pop('missing_rate', None)
+-    args.batch_size = cli.batch_size or (2 if cli.smoke else 4)
++    args.batch_size = cli.batch_size or (2 if cli.smoke else original_batch)
++    if cli.method == 'MISA' and not cli.smoke and args.batch_size != original_batch:
++        p.error('MISA CMD/DiffLoss require the native physical batch; gradient accumulation is not equivalent')
+     if original_batch % args.batch_size:
+         p.error(f'batch size must divide original batch {original_batch}')
+     original_update = args.get('update_epochs', 1)
+@@ -149,7 +151,7 @@
+                     condition=condition, rate=cli.rate, original_batch_size=original_batch,
+                     gradient_checkpointing=cli.gradient_checkpointing, input_path=str(path),
+                     nominal_effective_batch=original_batch*original_update,
+-                    numerical_adaptation='Microbatch accumulation; MISA BatchNorm statistics depend on microbatch size.',
++                    numerical_adaptation='Native physical batch required for MISA CMD and DiffLoss statistics; MISA uses LayerNorm.',
+                     masks=masks, split_id_audit=id_audit, train_samples=len(loaders['train'].dataset), valid_samples=len(loaders['valid'].dataset),
+                     training_seed=None, test_evaluated=False, input_type='unaligned cached features + finetuned BERT',
+                     source_manifest=str(HERE/'vendor/mmsa/source_manifest.json'))
+@@ -163,12 +165,14 @@
+     trainer.do_train(model,loaders,return_epoch_results=False)
+     if not (out/'best.pt').is_file(): raise RuntimeError('No best checkpoint produced')
+     best = min(history,key=lambda x:x['metrics'][args.KeyEval])
++    from metrics_common import digest
+     result = {'status':'validation_locked_no_test_evaluated', 'smoke':cli.smoke,
+               'method':cli.method,'dataset':cli.dataset,'protocol':cli.protocol,'condition':condition,'rate':cli.rate,
+               'selected_epoch':best['epoch'], 'valid_score':best['metrics'][args.KeyEval],
+               'validation_metrics':best['metrics'],'checkpoint':str(out/'best.pt'),
+               'epochs_completed':len(history),'elapsed_seconds':time.time()-start,
+               'checkpoint_bytes':(out/'best.pt').stat().st_size,'test_evaluated':False,
++              'checkpoint_sha256':digest(out/'best.pt'),
+               'peak_cuda_bytes':torch.cuda.max_memory_allocated() if cli.device=='cuda' else None}
+     (out/'validation_lock.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
+     logging.info('COMPLETED %s',json.dumps(result))

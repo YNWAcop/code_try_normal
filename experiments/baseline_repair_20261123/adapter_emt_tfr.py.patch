@@ -1,0 +1,53 @@
+--- historical/adapter_emt_tfr.py
++++ repair/adapter_emt_tfr.py
+@@ -32,6 +32,7 @@
+     p.add_argument('--out', type=Path, required=True)
+     p.add_argument('--device', choices=['cuda', 'cpu'], default='cuda')
+     p.add_argument('--batch-size', type=int)
++    p.add_argument('--activation-checkpointing', action='store_true')
+     p.add_argument('--data-root', type=Path, default=Path('D:/MSA_Cloud_20261115'))
+     p.add_argument('--evaluate-only', action='store_true')
+     cli = p.parse_args()
+@@ -79,7 +80,7 @@
+     args.gradient_scale = args.batch_size / original_batch
+     args.pop('missing_seed', None)
+     if cli.smoke:
+-        args.batch_size, args.update_epochs = 2, 1
++        args.batch_size, args.update_epochs = cli.batch_size or 2, 1
+         args.gradient_scale = 1.0
+     # The native EMT default 'Loss' includes reconstruction on withheld targets.
+     # Select the deployed incomplete-view validation MAE instead.
+@@ -100,8 +101,8 @@
+         def __init__(self, split):
+             d = blob[split]
+             self.text = np.asarray(d['text_bert'], dtype=np.float32)
+-            self.audio = np.asarray(d['audio'], dtype=np.float32)
+-            self.vision = np.asarray(d['vision'], dtype=np.float32)
++            self.audio = d['audio']
++            self.vision = d['vision']
+             self.ids = d['id']
+             self.labels = np.asarray(d['regression_labels'], dtype=np.float32).reshape(-1,1)
+             self.audio_lengths = np.clip(np.asarray(d['audio_lengths'], dtype=np.int64), 1, self.audio.shape[1])
+@@ -109,7 +110,7 @@
+         def __len__(self):
+             return len(self.ids)
+         def __getitem__(self, i):
+-            return {'text':torch.from_numpy(self.text[i].copy()), 'audio':torch.from_numpy(np.nan_to_num(self.audio[i], nan=0,posinf=0,neginf=0)), 'vision':torch.from_numpy(np.nan_to_num(self.vision[i], nan=0,posinf=0,neginf=0)), 'audio_lengths':int(self.audio_lengths[i]), 'vision_lengths':int(self.vision_lengths[i]), 'labels':{'M':torch.from_numpy(self.labels[i].copy())}, 'id':str(self.ids[i]), 'index':i}
++            return {'text':torch.from_numpy(self.text[i].copy()), 'audio':torch.from_numpy(np.nan_to_num(np.asarray(self.audio[i],dtype=np.float32), nan=0,posinf=0,neginf=0)), 'vision':torch.from_numpy(np.nan_to_num(np.asarray(self.vision[i],dtype=np.float32), nan=0,posinf=0,neginf=0)), 'audio_lengths':int(self.audio_lengths[i]), 'vision_lengths':int(self.vision_lengths[i]), 'labels':{'M':torch.from_numpy(self.labels[i].copy())}, 'id':str(self.ids[i]), 'index':i}
+ 
+     class NativeMissing(Dataset):
+         def __init__(self, split):
+@@ -153,8 +154,12 @@
+         raise RuntimeError('Train/validation IDs overlap.')
+     info = {'cli':vars(cli), 'native_config':dict(args), 'original_batch_size':original_batch, 'original_update_epochs':original_update, 'memory_override':args.batch_size != original_batch, 'training_seed':None, 'split_id_sha256':data_hash, 'train_count':len(train), 'valid_count':len(valid), 'mask_paths':{s:str(getattr(d.corrupt,'mask_path','whole_fixed')) for s,d in [('train',train),('valid',valid)]}, 'validation_targets':'only sentiment labels; withheld feature inputs replaced with corrupted copies', 'protocol':'Whole T empty CLS/SEP; A/V zero with public length1. Training privileged complete targets for native losses.', 'checkpoint_selection':args.KeyEval, 'native_patch_manifest':str(vendor/'PATCH_MANIFEST.json')}
+     if not cli.evaluate_only: dump(out/'config.json',info)
+-    loaders = {s:DataLoader(Subset(d,range(min(4,len(d)))) if cli.smoke else d, batch_size=args.batch_size, shuffle=s=='train', num_workers=0, drop_last=s=='train', pin_memory=cli.device=='cuda') for s,d in [('train',train),('valid',valid)]}
++    loaders = {s:DataLoader(Subset(d,range(min(args.batch_size*2,len(d)))) if cli.smoke else d, batch_size=args.batch_size, shuffle=s=='train', num_workers=0, drop_last=s=='train', pin_memory=cli.device=='cuda') for s,d in [('train',train),('valid',valid)]}
+     model = AMIO(args).to(args.device)
++    if cli.activation_checkpointing:
++        if cli.method != 'EMT_DLFR': raise ValueError('Checkpointing verified for EMT only')
++        model.Model.activation_checkpointing = True
++        model.Model.text_model.model.gradient_checkpointing_enable()
+     from full_four import evaluate_selected
+     if cli.evaluate_only:
+         evaluate_selected(model, loaders['valid'], cli, args)
