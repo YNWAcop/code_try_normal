@@ -1,21 +1,24 @@
-# 最终模型与代码对应
+# Architecture and implementation
 
-输入层先形成原始文本、原生音频/视觉特征、音频识别文本特征、视觉语音特征、视觉识别文本、表情、质量与时序特征。它们是冻结缓存，后续训练学习任务网络与修正组件。
+EviSA enriches visible evidence, routes by original-transcript availability, and outputs a single continuous sentiment score. All paths operate on frozen feature caches.
 
-| 图中的阶段 | 实现 | 实际作用 |
+| Component | Implementation under `src/evidence_msa/` | Role |
 |---|---|---|
-| 输入证据 | `features/prepare.py` | 按样本 ID 对齐多来源缓存 |
-| 缺失模态路由 | `inference.py` | A/V/AV 使用 V1，T/TA/TV 使用增强分支 |
-| V1 | `text_absent/v1.py` | 固定可见条件，视觉双流与时间池化，无文本预测头 |
-| C5 | `text_present/model.py` | 文本主干、音视频共享与残差证据、可见 token 注意力、分布输出 |
-| 双线性交互 | `raw_adapters.py`、`adapters.py` | 对可见模态进行残差适配 |
-| 文本锚点 | `text_anchor.py`、`cell_text_anchor.py` | 文本预测与保持分类签名的区间修正 |
-| 证据修正器 D24 | `calibration.py`、`factorized_anchor.py`、`train.py` | 折外共识、增量门控、类别内幅度校准、极性/强度分解 |
-| 近零修复 R3 | `runner.py:repair` | 固定半径与置信阈值下修复极性；保持 Acc5/Acc7 的类别 |
-| 最终标量 | `common/metrics.py` | 同一个分数计算全部分类与回归指标 |
+| Input preparation | `features/prepare.py` | Align cached features by sample ID |
+| Routing | `inference.py` | Select the text-absent or text-present predictor |
+| Text-absent path | `text_absent/v1.py` | Audio/visual evidence, visual dual streams, temporal pooling |
+| TEF | `text_present/model.py` | Text anchor, shared/residual evidence, attention, ordinal output |
+| Bilinear adaptation | `text_present/raw_adapters.py`, `adapters.py` | Residual interactions over visible evidence |
+| Text anchors | `text_present/text_anchor.py`, `cell_text_anchor.py` | Text estimates and interval-aware corrections |
+| Calibration | `text_present/calibration.py` | Increment gates, grouped consensus, interval and intensity adjustments |
+| Factorized anchor | `text_present/factorized_anchor.py` | Separate polarity and magnitude estimates |
+| Polarity repair | `text_present/runner.py:repair` | Confidence-conditioned sign repair near zero |
+| Evaluation | `common/metrics.py` | Classification and regression from the same score |
 
-C5 不是一个额外的大型预训练模型；它是当前冻结特征上的任务网络。共享成分来自训练内 Ridge 估计；不要把代码中的 `AS/VS` 解释为额外观测到的模态。缺失模态不参加对应条件的预测。
+The public name **TEF** corresponds to the legacy `C5` identifier. **ERU** covers the established adaptation, anchor, calibration, consensus, factorized-anchor, and near-zero repair pipeline; `D24` and `R3` are historical implementation identifiers. They remain in code and checkpoint names for compatibility.
 
-主模型及四个分组交叉拟合子模型构成共识，组件之间还有验证集选择和折外训练。它不是单网络一次前向，也不是五个随机种子重复实验。参数、损失、训练轮次和权重以 `protocol.py` 与对应实现为准，未因本次目录整理做算法调参。
+The shared component is estimated by a training-only ridge mapping, rather than an additional observed modality. Missing channels cannot affect the prediction for a fixed visible set.
 
-`calibration.signature` 同时记录正负边界和 Acc5/Acc7 取整结果。区间内修正保持该签名；R3 可以改变二分类极性，所以不宣称整个增强链保持所有分类预测不变。收益须由实际评测判断。
+The text-present pipeline includes a main model and four video-grouped, cross-fitted auxiliary models. It is not a single-network forward pass and not a multi-seed ensemble. Its complete inference cost includes the components actually used at prediction time.
+
+Interval calibration preserves the relevant classification boundaries. The final near-zero repair can change binary polarity, so the entire ERU pipeline is not class-preserving. Frozen parameters and selection rules are recorded in `configs/final_protocol.json` and `text_present/protocol.py`.

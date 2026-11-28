@@ -1,1 +1,0 @@
-from mmsa_mapped_pickle import load_fields
